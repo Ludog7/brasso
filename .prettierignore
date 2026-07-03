@@ -1,0 +1,8 @@
+dist
+node_modules
+.turbo
+coverage
+pnpm-lock.yaml
+
+# Documents de référence rédigés à la main (source de vérité — non reformatés)
+docs/
