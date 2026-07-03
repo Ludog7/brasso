@@ -1,0 +1,38 @@
+name: "🏛️ ADR — Décision d'architecture"
+description: "Proposer/remettre en cause une décision d'architecture. Cf. SPEC-ORCHESTRATION §0."
+title: "[adr] "
+labels: ["adr"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Les ADR existants sont **figés**. Toute évolution passe par ce ticket + un fichier dans `docs/adr/`.
+  - type: input
+    id: sujet
+    attributes:
+      label: Décision concernée
+      description: "Nouvelle décision, ou n° d'ADR existant remis en cause (ADR-0x)."
+    validations:
+      required: true
+  - type: textarea
+    id: contexte
+    attributes:
+      label: Contexte & problème
+      description: "Ce qui motive la décision. Contraintes."
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options envisagées
+      value: |
+        - Option A —
+        - Option B —
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Décision proposée & conséquences
+    validations:
+      required: true

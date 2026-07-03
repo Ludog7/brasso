@@ -1,0 +1,38 @@
+name: "🐛 Bug"
+description: "Un comportement incorrect découvert. Jamais de fix silencieux — cf. SPEC-ORCHESTRATION §5.4."
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: "Ce qui est observé vs attendu."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Étapes de reproduction
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: attendu
+    attributes:
+      label: Comportement attendu
+    validations:
+      required: true
+  - type: textarea
+    id: contexte
+    attributes:
+      label: Contexte
+      description: "Milestone courant, module, environnement, logs éventuels."
+  - type: input
+    id: reference
+    attributes:
+      label: Référence spec
+      description: "Section de SPEC-ORCHESTRATION / SPEC-FONCTIONNELLE / FORMULES-BRASSICOLES si applicable."

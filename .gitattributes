@@ -1,0 +1,10 @@
+# Normalisation des fins de ligne
+* text=auto
+
+# Les scripts shell doivent rester en LF (exécution bash / conteneurs)
+*.sh text eol=lf
+
+# Fichiers Windows en CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf

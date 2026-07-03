@@ -1,0 +1,58 @@
+name: "✨ Feature / Tâche"
+description: "Tâche exécutable en autonomie dans une session Claude Code (cf. SPEC-ORCHESTRATION §5.2)"
+title: "[Mx-yy] "
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Un ticket = **une session Claude Code** (cible 1-4 h équivalent). Contexte complet, aucun savoir implicite.
+  - type: textarea
+    id: contexte
+    attributes:
+      label: Contexte
+      description: "2-5 lignes : pourquoi, avec référence à la section de SPEC-ORCHESTRATION.md ou SPEC-FONCTIONNELLE.md qui fait foi."
+      placeholder: "Cf. SPEC-ORCHESTRATION §X.Y — ..."
+    validations:
+      required: true
+  - type: input
+    id: objectif
+    attributes:
+      label: Objectif
+      description: "Résultat observable, une phrase."
+    validations:
+      required: true
+  - type: textarea
+    id: perimetre
+    attributes:
+      label: Périmètre technique
+      description: "Fichiers/dossiers concernés et hors périmètre explicite."
+      value: |
+        - Fichiers/dossiers concernés :
+        - Hors périmètre explicite :
+    validations:
+      required: true
+  - type: textarea
+    id: specification
+    attributes:
+      label: Spécification
+      description: "Détail : schémas, routes, règles métier, formules référencées."
+    validations:
+      required: true
+  - type: textarea
+    id: dod
+    attributes:
+      label: Definition of Done
+      value: |
+        - [ ] Tests (unitaires core obligatoires si formule/règle métier)
+        - [ ] Lint + CI verte
+        - [ ] Pas de régression sur les tests existants
+        - [ ] Critère fonctionnel observable :
+    validations:
+      required: true
+  - type: input
+    id: dependances
+    attributes:
+      label: Dépendances
+      description: "Bloqué par / Bloque (numéros d'issues)."
+      placeholder: "Bloqué par : #xx — Bloque : #yy"
