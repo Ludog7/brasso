@@ -1,0 +1,39 @@
+// Infra Prisma de Brasso. Le schéma métier complet (recettes polymorphes,
+// batch, stock, membres, hub) arrive au ticket M1-01 — ici uniquement la
+// datasource, le generator et la table `Settings`.
+//
+// Règle CLAUDE.md : ne JAMAIS modifier une migration déjà mergée → toute
+// évolution passe par une nouvelle migration additive.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// Configuration mono-tenant de l'instance (ADR-01 : aucune constante métier
+/// hardcodée hors de cette table). Prévue en ligne unique, extensible au fil
+/// des besoins (profils d'eau, TVA, fuseau, nom de l'asso…).
+model Settings {
+  id String @id @default(cuid())
+
+  /// Nom de l'association / microbrasserie.
+  assoName String
+
+  /// Taux de TVA en parties par million (ppm) — ex. 20 % = 200000 ppm.
+  /// Unité entière conforme à la règle « pas de flottant pour la monnaie/taux ».
+  tvaRatePpm Int @default(0)
+
+  /// Profil d'eau par défaut (JSONB) : concentrations ioniques (Ca, Mg, HCO3…),
+  /// structure détaillée définie côté `core` en M1.
+  defaultWaterProfile Json?
+
+  /// Fuseau horaire de l'instance (IANA), défaut France métropolitaine.
+  timezone String @default("Europe/Paris")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
