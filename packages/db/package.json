@@ -22,13 +22,20 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx --env-file=../../.env seed/seed.ts",
+    "db:reset": "prisma migrate reset --force",
     "db:studio": "prisma studio"
+  },
+  "prisma": {
+    "seed": "tsx seed/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0"
   },
   "devDependencies": {
+    "@node-rs/argon2": "^2.0.0",
     "@types/node": "^22.10.2",
-    "prisma": "^6.1.0"
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.0"
   }
 }
