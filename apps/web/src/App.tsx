@@ -1,0 +1,51 @@
+import { Loader2 } from "lucide-react";
+import { type ReactNode } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+
+import { useBootstrapSession } from "@/hooks/useAuth";
+import { HomePage } from "@/routes/HomePage";
+import { LoginPage } from "@/routes/LoginPage";
+import { RequireAuth } from "@/routes/RequireAuth";
+import { Button } from "@/ui/button";
+
+function Splash({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-muted-foreground">
+      {children}
+    </div>
+  );
+}
+
+export function App() {
+  const bootstrap = useBootstrapSession();
+
+  if (bootstrap.isPending) {
+    return (
+      <Splash>
+        <Loader2 className="size-8 animate-spin" aria-hidden="true" />
+        <span>Chargement…</span>
+      </Splash>
+    );
+  }
+
+  if (bootstrap.isError) {
+    return (
+      <Splash>
+        <p role="alert">Serveur injoignable.</p>
+        <Button variant="outline" onClick={() => void bootstrap.refetch()}>
+          Réessayer
+        </Button>
+      </Splash>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<RequireAuth />}>
+        <Route path="/" element={<HomePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
