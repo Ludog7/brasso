@@ -37,3 +37,30 @@ model Settings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+/// Compte utilisateur — extension minimale pour l'authentification (M0-06).
+/// Le rôle RBAC (matrice §3.5) est ajouté par M0-07 ; le schéma membres complet
+/// (adhésion, RGPD…) arrive en M1-01. `passwordHash` = Argon2id, jamais le clair.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  displayName  String
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+}
+
+/// Session serveur persistée (ADR-10 : cookie + session en DB). Le token brut
+/// n'est jamais stocké — seul son hash SHA-256 l'est ; le cookie porte le token.
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
