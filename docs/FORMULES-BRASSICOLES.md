@@ -304,11 +304,21 @@ SG = plato_to_sg(P)
 
 Indispensable : l'éthanol fausse la lecture. Deux mesures requises : **Brix initial (OB)** et **Brix courant/final (FB)**, tous deux au réfractomètre.
 
-**Méthode linéaire simple (rapide) :**
+**Méthode « standard » simple (équation grand public, corrigée cf. bug #43) :**
 
 ```
-FGcorrigé = (FB × WCF) − (OB − FB) × 0.00085   ... [forme simplifiée approchée]
+ob = OB / WCF ; fb = FB / WCF
+
+FGtrue = 1.001843
+       − 0.002318474 × ob
+       − 0.000007775 × ob²
+       − 0.000000034 × ob³
+       + 0.00574     × fb
+       + 0.00003344  × fb²
+       + 0.000000086 × fb³
 ```
+
+> ⚠️ L'ancienne « forme simplifiée » `(FB × WCF) − (OB − FB) × 0.00085` renvoyait ~6.76 (pas une SG) : formule cassée, remplacée par l'équation standard ci-dessus (bug #43).
 
 **Méthode Terrill cubique (RECOMMANDÉE — la plus précise) :**
 
@@ -345,7 +355,7 @@ refractoFgCorrected(
 ): number   // renvoie SG (ex. 1.011)
 ```
 
-**Validation Terrill cubique** : OB 12,0 °Bx / FB 6,5 °Bx / WCF 1.04 → FG ≈ **1.010** (tolérance ±0,002).
+**Validation Terrill cubique** : OB 12,0 °Bx / FB 6,5 °Bx / WCF 1.04 → FG ≈ **0.999** (tolérance ±0,002) — bière très sèche, cohérent avec FB 6,5. *(Corrigé cf. bug #43 : l'ancienne valeur ≈1.010 provenait en fait de l'équation « standard » simple, qui donne ≈1.011 pour ces mêmes entrées.)*
 
 ---
 
