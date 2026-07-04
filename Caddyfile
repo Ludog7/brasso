@@ -1,0 +1,32 @@
+# Reverse proxy + TLS automatique (Let's Encrypt) pour le déploiement prod.
+# Les variables sont injectées par docker-compose.yml.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	# En-têtes de sécurité de base
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# API : /api/* → conteneur api
+	handle /api/* {
+		reverse_proxy api:{$API_PORT}
+	}
+
+	# Front SPA : fichiers statiques buildés, fallback SPA sur index.html.
+	# La livraison réelle des assets (volume/image web) est finalisée en M0-08.
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}

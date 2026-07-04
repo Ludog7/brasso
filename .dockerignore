@@ -1,0 +1,26 @@
+# Dépendances et artefacts de build (réinstallés/recompilés dans l'image)
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.turbo
+.turbo
+
+# Historique git et config CI
+.git
+.gitignore
+.github
+
+# Docs, couverture (source de vérité — inutiles au build de l'image)
+docs
+coverage
+
+# Fichiers Docker / reverse-proxy (non nécessaires dans le contexte de build)
+docker-compose*.yml
+Dockerfile
+.dockerignore
+Caddyfile
+
+# Secrets et env locaux — JAMAIS dans l'image (cf. sécurité §6)
+.env
+.env.*
+!.env.example

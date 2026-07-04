@@ -1,0 +1,27 @@
+name: brasso-dev
+
+# Environnement de développement : fournit uniquement PostgreSQL.
+# L'API et le front tournent sur l'hôte en hot-reload (`pnpm dev`) tant que
+# leurs serveurs de dev n'existent pas (API : M0-05, web : M0-08). Le port
+# Postgres est exposé pour que l'API lancée sur l'hôte puisse s'y connecter.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brasso}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brasso}
+      POSTGRES_DB: ${POSTGRES_DB:-brasso}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brasso} -d ${POSTGRES_DB:-brasso}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata_dev:
