@@ -23,3 +23,6 @@ export * from "./formulas/color.js";
 
 // Formules brassicoles — empâtage & eau : strike, sparge, infusion (M1-08, FORMULES §6).
 export * from "./formulas/mash.js";
+
+// Formules brassicoles — mesures densimètre / réfractomètre Terrill (M1-09, FORMULES §7).
+export * from "./formulas/measurements.js";
