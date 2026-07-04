@@ -20,3 +20,6 @@ export * from "./formulas/ibu.js";
 
 // Formules brassicoles — couleur EBC/SRM (Morey) + ebcToHex (M1-07, FORMULES §5 + Annexe A).
 export * from "./formulas/color.js";
+
+// Formules brassicoles — empâtage & eau : strike, sparge, infusion (M1-08, FORMULES §6).
+export * from "./formulas/mash.js";
