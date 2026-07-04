@@ -8,6 +8,7 @@ import {
   cToF,
   DEFAULT_EFFICIENCY,
   DEFAULT_MASH_RATIO,
+  ebcToLovibond,
   ebcToSrm,
   fToC,
   galToL,
@@ -19,6 +20,7 @@ import {
   kgToG,
   lbToG,
   LITERS_PER_GALLON,
+  lovibondToEbc,
   lovibondToSrm,
   lToGal,
   MASH_HEAT_RATIO,
@@ -137,6 +139,11 @@ describe("couleur", () => {
   it("°Lovibond ↔ SRM (SRM = 1.3546 × °L − 0.76)", () => {
     expect(lovibondToSrm(10)).toBeCloseTo(12.786, 3);
     expect(srmToLovibond(lovibondToSrm(8))).toBeCloseTo(8, EXACT);
+  });
+
+  it("EBC ↔ °Lovibond (§5 : (EBC/1.97 + 0.76)/1.3546)", () => {
+    expect(ebcToLovibond(7)).toBeCloseTo(3.184, 3);
+    expect(lovibondToEbc(ebcToLovibond(12))).toBeCloseTo(12, EXACT);
   });
 });
 

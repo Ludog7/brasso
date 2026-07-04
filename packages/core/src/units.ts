@@ -176,6 +176,16 @@ export function srmToLovibond(srm: number): number {
   return (srm + 0.76) / 1.3546;
 }
 
+/** EBC → degrés Lovibond (§5) : `(EBC/1.97 + 0.76)/1.3546`. */
+export function ebcToLovibond(ebc: number): number {
+  return srmToLovibond(ebcToSrm(ebc));
+}
+
+/** Degrés Lovibond → EBC (inverse du §5). */
+export function lovibondToEbc(lovibond: number): number {
+  return srmToEbc(lovibondToSrm(lovibond));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pression (unité interne : bar)
 // ─────────────────────────────────────────────────────────────────────────────
