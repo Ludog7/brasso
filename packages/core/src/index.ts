@@ -29,3 +29,6 @@ export * from "./formulas/measurements.js";
 
 // Formules brassicoles — carbonatation : priming, keg PSI, CO₂ résiduel (M1-10, FORMULES §8).
 export * from "./formulas/carbonation.js";
+
+// Formules brassicoles — post-mortem : rendement, atténuation, dilution, blend (M1-11, FORMULES §9).
+export * from "./formulas/postmortem.js";
