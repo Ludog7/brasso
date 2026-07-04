@@ -7,6 +7,8 @@ export interface AuthUserRecord {
   displayName: string;
   passwordHash: string;
   isActive: boolean;
+  /** Clés des rôles RBAC affectés (via `UserRole` → `Role.key`). */
+  roles: string[];
 }
 
 /** Session persistée : on ne stocke que le hash du token, jamais le token brut. */
@@ -29,21 +31,48 @@ export interface AuthRepository {
   deleteSession(tokenHash: string): Promise<void>;
 }
 
+/** Colonnes lues pour l'auth + rôles (via jointure `UserRole`). */
+const USER_SELECT = {
+  id: true,
+  email: true,
+  displayName: true,
+  passwordHash: true,
+  isActive: true,
+  roles: { select: { role: { select: { key: true } } } },
+} as const;
+
+type UserRow = {
+  id: string;
+  email: string;
+  displayName: string;
+  passwordHash: string;
+  isActive: boolean;
+  roles: { role: { key: string } }[];
+};
+
+/** Aplati la jointure `UserRole` en simple liste de clés de rôles. */
+function toRecord(row: UserRow): AuthUserRecord {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.displayName,
+    passwordHash: row.passwordHash,
+    isActive: row.isActive,
+    roles: row.roles.map((ur) => ur.role.key),
+  };
+}
+
 export class PrismaAuthRepository implements AuthRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async findUserByEmail(email: string): Promise<AuthUserRecord | null> {
-    return this.prisma.user.findUnique({
-      where: { email },
-      select: { id: true, email: true, displayName: true, passwordHash: true, isActive: true },
-    });
+    const row = await this.prisma.user.findUnique({ where: { email }, select: USER_SELECT });
+    return row ? toRecord(row) : null;
   }
 
   async findUserById(id: string): Promise<AuthUserRecord | null> {
-    return this.prisma.user.findUnique({
-      where: { id },
-      select: { id: true, email: true, displayName: true, passwordHash: true, isActive: true },
-    });
+    const row = await this.prisma.user.findUnique({ where: { id }, select: USER_SELECT });
+    return row ? toRecord(row) : null;
   }
 
   async createSession(session: SessionRecord): Promise<void> {

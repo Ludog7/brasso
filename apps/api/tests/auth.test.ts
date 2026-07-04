@@ -60,6 +60,7 @@ async function makeApp(): Promise<FastifyInstance> {
     displayName: "Admin",
     passwordHash,
     isActive: true,
+    roles: ["admin"],
   });
   return buildApp({ config, authRepository: repo });
 }

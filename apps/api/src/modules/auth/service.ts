@@ -24,6 +24,8 @@ export interface AuthUser {
   id: string;
   email: string;
   displayName: string;
+  /** Clés de rôles RBAC (matrice §3.5) ; union des droits côté autorisation. */
+  roles: string[];
 }
 
 export interface LoginResult {
@@ -41,7 +43,12 @@ export class InvalidCredentialsError extends Error {
 }
 
 export function toPublicUser(user: AuthUserRecord): AuthUser {
-  return { id: user.id, email: user.email, displayName: user.displayName };
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    roles: user.roles,
+  };
 }
 
 function hashToken(token: string): string {

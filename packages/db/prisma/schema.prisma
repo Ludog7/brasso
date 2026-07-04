@@ -42,14 +42,15 @@ model Settings {
 /// Le rôle RBAC (matrice §3.5) est ajouté par M0-07 ; le schéma membres complet
 /// (adhésion, RGPD…) arrive en M1-01. `passwordHash` = Argon2id, jamais le clair.
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id           String     @id @default(cuid())
+  email        String     @unique
   passwordHash String
   displayName  String
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   sessions     Session[]
+  roles        UserRole[]
 }
 
 /// Session serveur persistée (ADR-10 : cookie + session en DB). Le token brut
@@ -63,4 +64,30 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+/// Rôle RBAC (matrice §3.5, figée V1 : admin, brasseur, caisse, rgpd). Table de
+/// référence, seedée par la migration. La matrice des permissions elle-même vit
+/// dans le code (`apps/api/src/rbac/matrix.ts`) comme source unique typée ; cette
+/// table ne porte que l'appartenance utilisateur ↔ rôle. `key` = identifiant
+/// stable référencé par le code.
+model Role {
+  id        String     @id @default(cuid())
+  key       String     @unique
+  label     String
+  createdAt DateTime   @default(now())
+  users     UserRole[]
+}
+
+/// Affectation d'un rôle à un utilisateur (jointure N–N). Les droits effectifs
+/// sont l'union des rôles (voir `can()` dans le plugin RBAC).
+model UserRole {
+  userId    String
+  roleId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
 }
