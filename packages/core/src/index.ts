@@ -17,3 +17,6 @@ export * from "./formulas/abv.js";
 
 // Formules brassicoles — amertume IBU Tinseth / Rager (M1-06, FORMULES §4).
 export * from "./formulas/ibu.js";
+
+// Formules brassicoles — couleur EBC/SRM (Morey) + ebcToHex (M1-07, FORMULES §5 + Annexe A).
+export * from "./formulas/color.js";
