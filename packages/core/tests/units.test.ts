@@ -15,12 +15,14 @@ import {
   GRAMS_PER_POUND,
   gToKg,
   gToLb,
+  gToMg,
   kgToG,
   lbToG,
   LITERS_PER_GALLON,
   lovibondToSrm,
   lToGal,
   MASH_HEAT_RATIO,
+  mgToG,
   platoToBrix,
   platoToSg,
   points,
@@ -65,6 +67,12 @@ describe("masse", () => {
     expect(gToLb(453.592)).toBeCloseTo(1, EXACT);
     expect(lbToG(1)).toBeCloseTo(453.592, EXACT);
     expect(lbToG(gToLb(1000))).toBeCloseTo(1000, EXACT);
+  });
+
+  it("g ↔ mg (1 g = 1000 mg)", () => {
+    expect(gToMg(1)).toBe(1000);
+    expect(mgToG(1000)).toBe(1);
+    expect(mgToG(gToMg(1.68))).toBeCloseTo(1.68, EXACT);
   });
 });
 
