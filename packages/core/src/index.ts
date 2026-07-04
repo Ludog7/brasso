@@ -14,3 +14,6 @@ export * from "./formulas/gravity.js";
 
 // Formules brassicoles — ABV / ABW (M1-05, FORMULES §3).
 export * from "./formulas/abv.js";
+
+// Formules brassicoles — amertume IBU Tinseth / Rager (M1-06, FORMULES §4).
+export * from "./formulas/ibu.js";

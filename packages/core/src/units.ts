@@ -67,6 +67,16 @@ export function lbToG(lb: number): number {
   return lb * GRAMS_PER_POUND;
 }
 
+/** Grammes → milligrammes. */
+export function gToMg(g: number): number {
+  return g * 1000;
+}
+
+/** Milligrammes → grammes. */
+export function mgToG(mg: number): number {
+  return mg / 1000;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Volume (unité interne : litre)
 // ─────────────────────────────────────────────────────────────────────────────
