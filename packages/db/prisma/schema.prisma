@@ -1,9 +1,16 @@
-// Infra Prisma de Brasso. Le schéma métier complet (recettes polymorphes,
-// batch, stock, membres, hub) arrive au ticket M1-01 — ici uniquement la
-// datasource, le generator et la table `Settings`.
+// Schéma Prisma complet de Brasso — modèle de données §3 (SPEC-ORCHESTRATION),
+// détail des champs d'après SPEC-FONCTIONNELLE. Structuré par ADR-06/07/09.
 //
-// Règle CLAUDE.md : ne JAMAIS modifier une migration déjà mergée → toute
-// évolution passe par une nouvelle migration additive.
+// Conventions (CLAUDE.md) :
+//   - IDs `cuid`, timestamps `createdAt` / `updatedAt`.
+//   - Unités internes : gramme (g), litre (L), °C, SG brute (1.052), EBC,
+//     acides alpha en fraction (0.062), bar. Quantités physiques = Float.
+//   - Monnaie et taux : entiers (centimes, ppm) — jamais de flottant.
+//   - Aucune constante métier hardcodée (ADR-01) : tout paramètre vit en base
+//     (Settings, profils) ou dans le catalogue.
+//   - Append-only : StockMovement, ExternalTransaction, AuditLog n'ont pas
+//     d'`updatedAt` et sont verrouillés par trigger (voir migration).
+//   - Ne JAMAIS modifier une migration mergée → nouvelle migration additive.
 
 datasource db {
   provider = "postgresql"
@@ -13,6 +20,198 @@ datasource db {
 generator client {
   provider = "prisma-client-js"
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Moteur de calcul d'une recette (ADR-06) : détermine la table de détail et le
+/// moteur `core` (M1-12).
+enum RecipeEngine {
+  BEER
+  ALT_FERMENTED
+  SOFT_DRINK
+}
+
+/// Cycle de vie d'une recette (ADR-06). `PUBLISHED` est immuable.
+enum RecipeStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Catégorie d'ingrédient — base de la polymorphie `RecipeIngredient` (§3.3).
+enum IngredientCategory {
+  MALT
+  SUGAR
+  HOP
+  YEAST
+  ADJUNCT
+}
+
+/// Moment d'emploi d'un ingrédient (règles IBU par `use`, M1-06).
+enum IngredientUse {
+  MASH
+  FIRST_WORT
+  BOIL
+  WHIRLPOOL
+  DRY_HOP
+  PRIMARY
+  SECONDARY
+  BOTTLING
+  OTHER
+}
+
+/// Type d'étape de process d'une recette (params détaillés en JSONB).
+enum ProcessStepType {
+  MASH
+  MASH_STEP
+  SPARGE
+  BOIL
+  WHIRLPOOL
+  COOL
+  FERMENT
+  STABILIZE
+  CONDITION
+  PACKAGE
+  OTHER
+}
+
+/// Méthode de stabilisation (moteurs ALT/SOFT, sécurité microbio §ADR-11).
+/// Obligatoire pour publier une recette ALT (validé par core, M1-12).
+enum StabilizationMethod {
+  PASTEURIZATION
+  THERMAL
+  COLD_CHAIN
+  FILTRATION_ACIDIFICATION
+  CHEMICAL
+  OTHER
+}
+
+/// Statut d'un batch (ADR-07, §3.2).
+enum BatchStatus {
+  PLANIFIE
+  EN_BRASSAGE
+  EN_FERMENTATION
+  EN_CONDITIONNEMENT
+  TERMINE
+  ANNULE
+}
+
+/// Nature d'une mesure relevée sur un batch.
+enum MeasureType {
+  GRAVITY
+  TEMPERATURE
+  PH
+  VOLUME
+  OTHER
+}
+
+/// Phases de la state machine Jour J (§ spec fonctionnelle, détail core M1-13).
+enum DayPhase {
+  INITIALISATION
+  EMPATAGE
+  FILTRATION
+  EBULLITION
+  REFROIDISSEMENT
+  ENSEMENCEMENT
+  TERMINE
+}
+
+/// Logique de stock d'un article de catalogue (§3.3).
+enum CatalogKind {
+  RECETTE
+  BULK
+  CONDITIONNEMENT
+}
+
+/// Unité de stock d'un article. Unités internes g/L ; `UNIT` pour le comptable
+/// (bouteilles, capsules, fûts…).
+enum StockUnit {
+  GRAM
+  LITER
+  UNIT
+}
+
+/// Motif d'un mouvement de stock (registre append-only).
+enum StockMovementReason {
+  PURCHASE
+  PRODUCTION
+  ADJUSTMENT
+  INVENTORY
+  SALE
+  LOSS
+  RETURN
+  OTHER
+}
+
+/// Cycle de vie d'une réservation de stock (§3.3).
+enum ReservationStatus {
+  RESERVED
+  CONSUMED
+  RELEASED
+}
+
+/// Fournisseur externe branché au hub (ADR-09).
+enum ExternalProviderKind {
+  HELLOASSO
+  SUMUP
+  ZETTLE
+}
+
+/// Nature normalisée d'une transaction externe.
+enum ExternalTransactionKind {
+  SALE
+  MEMBERSHIP
+  DONATION
+  OTHER
+}
+
+/// Statut de rapprochement d'une transaction externe (mode dégradé §3.6).
+enum ExternalTransactionStatus {
+  MAPPED
+  UNMAPPED
+  IGNORED
+}
+
+/// Type d'anomalie d'intégration (dashboard anomalies §3.6).
+enum IntegrationAlertType {
+  UNMAPPED_TRANSACTION
+  WEBHOOK_FAILURE
+  OTHER
+}
+
+/// Statut d'une anomalie d'intégration.
+enum IntegrationAlertStatus {
+  OPEN
+  RESOLVED
+}
+
+/// Statut de cotisation d'un membre (§3.4).
+enum MembershipStatus {
+  A_JOUR
+  EN_RETARD
+}
+
+/// Type de consentement RGPD (historisé, §3.4).
+enum ConsentType {
+  COMMUNICATION
+  PHOTOS
+  NOTIFICATIONS_LEGALES
+}
+
+/// Fonction associative d'un membre (distincte des rôles RBAC applicatifs §3.5).
+enum AssociativeRole {
+  ADHERENT
+  BRASSEUR
+  CA
+  TRESORIER
+  REFERENT_RGPD
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Configuration mono-tenant de l'instance (ADR-01 : aucune constante métier
 /// hardcodée hors de cette table). Prévue en ligne unique, extensible au fil
@@ -38,19 +237,35 @@ model Settings {
   updatedAt DateTime @updatedAt
 }
 
-/// Compte utilisateur — extension minimale pour l'authentification (M0-06).
-/// Le rôle RBAC (matrice §3.5) est ajouté par M0-07 ; le schéma membres complet
-/// (adhésion, RGPD…) arrive en M1-01. `passwordHash` = Argon2id, jamais le clair.
+// ─────────────────────────────────────────────────────────────────────────────
+// Identité, RBAC, RGPD
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compte utilisateur (M0-06). Peut être lié — ou non — à un `Member` (§3.4) ;
+/// les données techniques (batchs, stocks) ne référencent QUE `User.id`, jamais
+/// l'identité personnelle du `Member` (séparation stricte). `passwordHash` =
+/// Argon2id, jamais le clair.
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
+  id           String   @id @default(cuid())
+  email        String   @unique
   passwordHash String
   displayName  String
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  sessions     Session[]
-  roles        UserRole[]
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  /// Lien optionnel vers le membre correspondant (compte ↔ personne).
+  memberId String? @unique
+  member   Member? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  sessions       Session[]
+  roles          UserRole[]
+  brewingBatches BatchBrewer[]
+  measures       BatchMeasure[]
+  deviationLogs  DeviationLog[]
+  stockMovements StockMovement[]
+  inventories    StockReservation[]
+  auditLogs      AuditLog[]
 }
 
 /// Session serveur persistée (ADR-10 : cookie + session en DB). Le token brut
@@ -67,10 +282,8 @@ model Session {
 }
 
 /// Rôle RBAC (matrice §3.5, figée V1 : admin, brasseur, caisse, rgpd). Table de
-/// référence, seedée par la migration. La matrice des permissions elle-même vit
-/// dans le code (`apps/api/src/rbac/matrix.ts`) comme source unique typée ; cette
-/// table ne porte que l'appartenance utilisateur ↔ rôle. `key` = identifiant
-/// stable référencé par le code.
+/// référence, seedée par migration. La matrice des permissions vit dans le code
+/// (`apps/api/src/rbac/matrix.ts`) ; cette table ne porte que l'appartenance.
 model Role {
   id        String     @id @default(cuid())
   key       String     @unique
@@ -79,8 +292,8 @@ model Role {
   users     UserRole[]
 }
 
-/// Affectation d'un rôle à un utilisateur (jointure N–N). Les droits effectifs
-/// sont l'union des rôles (voir `can()` dans le plugin RBAC).
+/// Affectation d'un rôle à un utilisateur (jointure N–N). Droits effectifs =
+/// union des rôles.
 model UserRole {
   userId    String
   roleId    String
@@ -90,4 +303,478 @@ model UserRole {
 
   @@id([userId, roleId])
   @@index([roleId])
+}
+
+/// Membre de l'association (donnée personnelle, §3.4). Séparé des données
+/// techniques ; la pseudonymisation post-délai légal (M6-08) remplace l'identité
+/// en conservant les agrégats comptables.
+model Member {
+  id           String            @id @default(cuid())
+  memberNumber String            @unique
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  address      String?
+  birthDate    DateTime?
+  membership   MembershipStatus  @default(EN_RETARD)
+  roles        AssociativeRole[] @default([])
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  user     User?
+  consents MemberConsent[]
+
+  @@index([lastName])
+}
+
+/// Consentement RGPD historisé (§3.4) : append-only, une ligne par changement.
+/// Le consentement courant est la ligne la plus récente pour `(memberId, type)`.
+model MemberConsent {
+  id        String      @id @default(cuid())
+  memberId  String
+  member    Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  type      ConsentType
+  granted   Boolean
+  createdAt DateTime    @default(now())
+
+  @@index([memberId, type])
+}
+
+/// Journal d'audit append-only (§3.4) : accès aux données personnelles et
+/// actions sensibles. Verrouillé contre UPDATE/DELETE (trigger, voir migration).
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: NoAction)
+  action       String
+  resourceType String
+  resourceId   String?
+  /// Membre concerné quand l'action porte sur une donnée personnelle (RGPD).
+  /// Champ scalaire volontaire (pas de FK) : l'audit survit à l'anonymisation.
+  memberId     String?
+  ip           String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([memberId])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recettes polymorphes (ADR-06, §3.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Modèle théorique d'une boisson. Commun aux 3 moteurs ; le détail spécifique
+/// vit dans une table 1-1 (`RecipeBeerDetails` / `RecipeAltDetails` /
+/// `RecipeSoftDetails`). Versioning : `familyId` regroupe les versions ;
+/// `(familyId, version)` unique ; une recette `PUBLISHED` est immuable.
+model Recipe {
+  id       String       @id @default(cuid())
+  /// Regroupe les versions d'une même recette (ADR-06).
+  familyId String
+  version  Int          @default(1)
+  name     String
+  engine   RecipeEngine
+  status   RecipeStatus @default(DRAFT)
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  beerDetails RecipeBeerDetails?
+  altDetails  RecipeAltDetails?
+  softDetails RecipeSoftDetails?
+  ingredients RecipeIngredient[]
+  steps       RecipeProcessStep[]
+  batches     Batch[]
+
+  @@unique([familyId, version])
+  @@index([engine, status])
+}
+
+/// Détail moteur BEER (§3.1) : cibles densité/couleur/amertume, style BJCP.
+model RecipeBeerDetails {
+  recipeId     String  @id
+  recipe       Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  styleBjcp    String?
+  targetOg     Float?
+  targetFg     Float?
+  targetIbu    Float?
+  targetEbc    Float?
+  boilTimeMin  Int?
+  /// Rendement de brassage attendu (fraction 0–1).
+  efficiency   Float?
+  batchVolumeL Float?
+}
+
+/// Détail moteur ALT_FERMENTED (ginger beer, hydromel, kombucha…). `baseType`
+/// = taxonomie interne configurable (ADR-01, pas d'enum figé). `stabilizationMethod`
+/// obligatoire pour publier (règle core M1-12).
+model RecipeAltDetails {
+  recipeId            String               @id
+  recipe              Recipe               @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  baseType            String
+  targetPh            Float?
+  stabilizationMethod StabilizationMethod?
+  /// Risque de sucre résiduel / carbonatation (indicateur, ADR-11).
+  residualSugarRisk   Boolean              @default(false)
+  batchVolumeL        Float?
+}
+
+/// Détail moteur SOFT_DRINK (limonades, boissons sucrées sans alcool).
+model RecipeSoftDetails {
+  recipeId            String               @id
+  recipe              Recipe               @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  /// Concentration en sucre (g/L).
+  sugarConcentration  Float?
+  targetPh            Float?
+  /// Mode de stockage : froid / ambiant (indicateur sécurité, ADR-11).
+  storageMode         String?
+  stabilizationMethod StabilizationMethod?
+  batchVolumeL        Float?
+}
+
+/// Ingrédient d'une recette (polymorphe par catégorie). Référence un
+/// `CatalogItem` quand il existe ; sinon ad-hoc via `name`. `params` porte le
+/// détail spécifique (ex. AA figés pour un houblon, forme…).
+model RecipeIngredient {
+  id            String             @id @default(cuid())
+  recipeId      String
+  recipe        Recipe             @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  catalogItemId String?
+  catalogItem   CatalogItem?       @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  name          String
+  category      IngredientCategory
+  use           IngredientUse?
+  amount        Float
+  unit          StockUnit          @default(GRAM)
+  /// Minute d'ajout (houblons : temps d'ébullition restant), si pertinent.
+  timeMinutes   Int?
+  params        Json?
+  sortOrder     Int                @default(0)
+
+  @@index([recipeId])
+  @@index([catalogItemId])
+}
+
+/// Étape ordonnée du process d'une recette (empâtage, ébullition, fermentation,
+/// stabilisation…). `params` JSONB : paliers, températures, durées, cibles.
+model RecipeProcessStep {
+  id        String          @id @default(cuid())
+  recipeId  String
+  recipe    Recipe          @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  type      ProcessStepType
+  name      String?
+  params    Json?
+  sortOrder Int             @default(0)
+
+  @@index([recipeId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Équipement
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Profil d'équipement (§3.2, moteur thermique M1-08). Toutes les pertes et
+/// paramètres physiques nécessaires aux calculs d'eau et de strike.
+model EquipmentProfile {
+  id                      String   @id @default(cuid())
+  name                    String
+  nominalVolumeL          Float
+  deadspaceL              Float    @default(0)
+  transferLossL           Float    @default(0)
+  evaporationRateLPerHour Float    @default(0)
+  /// Absorption d'eau par le grain (L/kg).
+  grainAbsorptionLPerKg   Float    @default(0)
+  /// Puissance de chauffe (kW), pour l'estimation des rampes (Jour J).
+  heatingPowerKw          Float?
+  /// Masse thermique de la cuve (kJ/°C), estimation temps de montée.
+  thermalMassKjPerC       Float?
+  /// Profils d'eau (base réseau + cibles par style), structure définie côté core.
+  waterProfiles           Json?
+  isActive                Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  batches Batch[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch (ADR-07, §3.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Instance d'exécution datée d'une recette (ADR-07). Fige `recipeSnapshot`
+/// (JSONB) au moment de la planification : le batch reste stable même si la
+/// recette évolue. `batchNumber` = séquence lisible.
+model Batch {
+  id                 String            @id @default(cuid())
+  batchNumber        Int               @unique @default(autoincrement())
+  recipeId           String
+  recipe             Recipe            @relation(fields: [recipeId], references: [id], onDelete: Restrict)
+  recipeVersion      Int
+  recipeSnapshot     Json
+  equipmentProfileId String?
+  equipmentProfile   EquipmentProfile? @relation(fields: [equipmentProfileId], references: [id], onDelete: SetNull)
+  status             BatchStatus       @default(PLANIFIE)
+
+  plannedAt   DateTime?
+  brewedAt    DateTime?
+  fermentedAt DateTime?
+  packagedAt  DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brewers       BatchBrewer[]
+  measures      BatchMeasure[]
+  deviationLogs DeviationLog[]
+  dayState      BatchDayState?
+  movements     StockMovement[]
+  reservations  StockReservation[]
+
+  @@index([recipeId])
+  @@index([status])
+}
+
+/// Brasseur(s) responsable(s) d'un batch (jointure N–N).
+model BatchBrewer {
+  batchId   String
+  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([batchId, userId])
+  @@index([userId])
+}
+
+/// Mesure réelle relevée sur un batch (append-only). `phase` = phase Jour J ou
+/// de fermentation ; `loggedBy` = utilisateur.
+model BatchMeasure {
+  id         String      @id @default(cuid())
+  batchId    String
+  batch      Batch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  type       MeasureType
+  value      Float
+  unit       String?
+  phase      String?
+  loggedById String?
+  loggedBy   User?       @relation(fields: [loggedById], references: [id], onDelete: SetNull)
+  loggedAt   DateTime    @default(now())
+
+  @@index([batchId, type])
+}
+
+/// Journal d'écart de procédure (§3.2) : créé par « Forcer l'étape » en mode
+/// manuel. Append-only.
+model DeviationLog {
+  id        String   @id @default(cuid())
+  batchId   String
+  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  step      String
+  reason    String
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([batchId])
+}
+
+/// État courant de la state machine Jour J (1-1 batch). Le détail (transitions,
+/// timers) est calculé par core (M1-13) ; la DB porte l'instantané reprenable.
+model BatchDayState {
+  batchId   String   @id
+  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  phase     DayPhase @default(INITIALISATION)
+  /// Timers, horodatages et statut par étape (JSONB, forme définie par core).
+  state     Json?
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue & stock (§3.3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Article de catalogue (ingrédient, bulk, conditionnement). `kind` détermine la
+/// logique de stock ; `category` (pour les articles RECETTE) porte la catégorie
+/// d'ingrédient. `attributes` JSONB : détail spécifique (couleur EBC des malts,
+/// acides alpha des houblons, atténuation des levures…), validé par core/Zod.
+model CatalogItem {
+  id                   String              @id @default(cuid())
+  name                 String
+  kind                 CatalogKind
+  category             IngredientCategory?
+  unit                 StockUnit           @default(GRAM)
+  attributes           Json?
+  /// Coût unitaire de référence (centimes), pour l'estimation du coût de revient.
+  defaultUnitCostCents Int?
+  /// Seuil d'alerte de stock bas (dans l'unité de l'article).
+  reorderThreshold     Float?
+  isActive             Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  lots              StockLot[]
+  movements         StockMovement[]
+  reservations      StockReservation[]
+  recipeIngredients RecipeIngredient[]
+  skuMappings       SkuMapping[]
+
+  @@index([kind])
+  @@index([category])
+}
+
+/// Lot physique d'un article (quantité, DLU, coût d'achat). La quantité courante
+/// se dérive des mouvements ; `quantity` sert d'aide/inventaire.
+model StockLot {
+  id            String      @id @default(cuid())
+  catalogItemId String
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Restrict)
+  lotCode       String?
+  quantity      Float       @default(0)
+  /// Date limite d'utilisation optimale.
+  bestBeforeAt  DateTime?
+  /// Coût unitaire à l'achat (centimes).
+  unitCostCents Int?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  movements StockMovement[]
+
+  @@index([catalogItemId])
+}
+
+/// Registre de mouvements de stock APPEND-ONLY (§3.3). `delta` signé, dans
+/// l'unité de l'article. Verrouillé contre UPDATE/DELETE (trigger, migration).
+model StockMovement {
+  id                    String               @id @default(cuid())
+  catalogItemId         String
+  catalogItem           CatalogItem          @relation(fields: [catalogItemId], references: [id], onDelete: Restrict)
+  stockLotId            String?
+  stockLot              StockLot?            @relation(fields: [stockLotId], references: [id], onDelete: NoAction)
+  delta                 Float
+  reason                StockMovementReason
+  batchId               String?
+  batch                 Batch?               @relation(fields: [batchId], references: [id], onDelete: NoAction)
+  userId                String?
+  user                  User?                @relation(fields: [userId], references: [id], onDelete: NoAction)
+  /// Transaction externe à l'origine du mouvement (vente mappée, §3.6).
+  externalTransactionId String?
+  externalTransaction   ExternalTransaction? @relation("TransactionStockMovements", fields: [externalTransactionId], references: [id], onDelete: NoAction)
+  note                  String?
+  createdAt             DateTime             @default(now())
+
+  @@index([catalogItemId])
+  @@index([batchId])
+  @@index([createdAt])
+}
+
+/// Réservation de stock (§3.3) : posée à la planification d'un batch (kind
+/// RECETTE), consommée à l'ensemencement (ajustée au volume réel).
+model StockReservation {
+  id            String            @id @default(cuid())
+  catalogItemId String
+  catalogItem   CatalogItem       @relation(fields: [catalogItemId], references: [id], onDelete: Restrict)
+  batchId       String
+  batch         Batch             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  quantity      Float
+  status        ReservationStatus @default(RESERVED)
+  createdById   String?
+  createdBy     User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([catalogItemId])
+  @@index([batchId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hub caisse & intégrations (ADR-09, §3.6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Fournisseur externe (HelloAsso / SumUp / Zettle). Les SECRETS (clé de
+/// signature webhook) restent en variables d'environnement — on ne stocke ici
+/// qu'une référence (`webhookSecretRef`), jamais le secret en clair (CLAUDE.md).
+model ExternalProvider {
+  id               String               @id @default(cuid())
+  kind             ExternalProviderKind
+  label            String
+  config           Json?
+  webhookSecretRef String?
+  isActive         Boolean              @default(true)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  transactions ExternalTransaction[]
+  skuMappings  SkuMapping[]
+  alerts       IntegrationAlert[]
+
+  @@unique([kind, label])
+}
+
+/// Transaction externe APPEND-ONLY (ADR-09) : payload brut conservé + champs
+/// normalisés. Jamais modifiée depuis la plateforme. Verrouillée par trigger.
+model ExternalTransaction {
+  id                String                    @id @default(cuid())
+  providerId        String
+  provider          ExternalProvider          @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  /// Identifiant natif chez le fournisseur (idempotence des webhooks).
+  externalId        String
+  kind              ExternalTransactionKind   @default(OTHER)
+  amountCents       Int
+  currency          String                    @default("EUR")
+  paymentMethod     String?
+  externalProductId String?
+  status            ExternalTransactionStatus @default(UNMAPPED)
+  /// Membre rapproché (cotisation HelloAsso → membre), si identifié.
+  memberId          String?
+  occurredAt        DateTime
+  rawPayload        Json
+  createdAt         DateTime                  @default(now())
+
+  alerts    IntegrationAlert[]
+  movements StockMovement[]    @relation("TransactionStockMovements")
+
+  @@unique([providerId, externalId])
+  @@index([status])
+  @@index([occurredAt])
+}
+
+/// Correspondance SKU interne ↔ produit externe (§3.6).
+model SkuMapping {
+  id                String           @id @default(cuid())
+  internalSku       String           @unique
+  catalogItemId     String?
+  catalogItem       CatalogItem?     @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  providerId        String
+  provider          ExternalProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  externalProductId String
+  externalCategory  String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([providerId, externalProductId])
+  @@index([catalogItemId])
+}
+
+/// Anomalie d'intégration (transaction non mappée / webhook en échec, §3.6) →
+/// dashboard anomalies, traitement manuel.
+model IntegrationAlert {
+  id            String                 @id @default(cuid())
+  type          IntegrationAlertType
+  status        IntegrationAlertStatus @default(OPEN)
+  message       String
+  providerId    String?
+  provider      ExternalProvider?      @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  transactionId String?
+  transaction   ExternalTransaction?   @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime               @default(now())
+  resolvedAt    DateTime?
+
+  @@index([status])
+  @@index([type])
 }
