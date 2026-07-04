@@ -1,5 +1,7 @@
-# Normalisation des fins de ligne
-* text=auto
+# Normalisation des fins de ligne : LF partout dans le working tree,
+# y compris sur Windows (indépendant de core.autocrlf) — le repo est en LF
+# et Prettier impose endOfLine:lf, donc format:check doit passer partout.
+* text=auto eol=lf
 
 # Les scripts shell doivent rester en LF (exécution bash / conteneurs)
 *.sh text eol=lf
