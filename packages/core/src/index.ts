@@ -11,3 +11,6 @@ export * from "./units.js";
 
 // Formules brassicoles — densités OG / FG / boil gravity (M1-04, FORMULES §1/§2/§4.2).
 export * from "./formulas/gravity.js";
+
+// Formules brassicoles — ABV / ABW (M1-05, FORMULES §3).
+export * from "./formulas/abv.js";
