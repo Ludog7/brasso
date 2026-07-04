@@ -19,5 +19,8 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
 
-export type { Prisma, Role, Settings, User, UserRole } from "@prisma/client";
-export { PrismaClient } from "@prisma/client";
+// Ré-exporte l'ensemble du client généré : `PrismaClient`, le namespace
+// `Prisma`, tous les types de modèles (§3) et les enums (utilisables comme
+// valeurs). Les consommateurs importent depuis `@brasso/db`, jamais
+// `@prisma/client` directement.
+export * from "@prisma/client";
