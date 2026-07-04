@@ -5,5 +5,6 @@ import type { FastifyPluginAsync } from "fastify";
  * (M0-03) et de smoke-test de la stack Fastify.
  */
 export const healthRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/health", async () => ({ status: "ok" as const }));
+  // Sonde publique : hors RBAC (opt-out explicite du deny-by-default).
+  app.get("/health", { config: { rbacExempt: true } }, async () => ({ status: "ok" as const }));
 };

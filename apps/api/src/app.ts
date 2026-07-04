@@ -11,6 +11,7 @@ import { healthRoutes } from "./modules/health/routes.js";
 import authPlugin from "./plugins/auth.js";
 import configPlugin from "./plugins/config.js";
 import errorHandler from "./plugins/errorHandler.js";
+import rbacPlugin from "./plugins/rbac.js";
 
 export interface BuildAppOptions {
   /** Config injectée (tests) ; sinon chargée depuis l'environnement. */
@@ -21,7 +22,7 @@ export interface BuildAppOptions {
 
 /**
  * Construit l'instance Fastify sans l'écouter — testable via `app.inject`
- * (séparation app/server, SPEC M0-05). RBAC (M0-07) viendra s'enregistrer ici.
+ * (séparation app/server, SPEC M0-05).
  */
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
@@ -38,6 +39,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(rateLimit, { global: false });
   await app.register(errorHandler);
   await app.register(authPlugin, { repository: opts.authRepository });
+  // RBAC après l'auth (en dépend) et AVANT les modules : son hook `onRoute`
+  // n'arme le deny-by-default que sur les routes enregistrées ensuite.
+  await app.register(rbacPlugin);
 
   await app.register(healthRoutes);
   await app.register(authRoutes);

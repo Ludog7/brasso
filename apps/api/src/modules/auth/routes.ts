@@ -16,7 +16,8 @@ const loginBody = z.object({
 export const authRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     "/auth/login",
-    { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    // Hors RBAC : le login doit rester joignable sans authentification.
+    { config: { rateLimit: { max: 5, timeWindow: "1 minute" }, rbacExempt: true } },
     async (request, reply) => {
       const parsed = loginBody.safeParse(request.body);
       if (!parsed.success) {
@@ -54,7 +55,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  app.post("/auth/logout", async (request, reply) => {
+  app.post("/auth/logout", { config: { rbacExempt: true } }, async (request, reply) => {
     const signed = request.cookies[SESSION_COOKIE];
     const unsigned = signed ? app.unsignCookie(signed) : null;
     if (unsigned?.valid && unsigned.value) {
@@ -64,7 +65,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ ok: true });
   });
 
-  app.get("/auth/me", { preHandler: [app.authenticate] }, (request) => {
-    return { user: request.user };
-  });
+  // Hors RBAC (aucune ressource métier) mais authentification requise : la
+  // route porte sa propre garde `authenticate`.
+  app.get(
+    "/auth/me",
+    { config: { rbacExempt: true }, preHandler: [app.authenticate] },
+    (request) => {
+      return { user: request.user };
+    },
+  );
 };
