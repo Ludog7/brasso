@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Annule les runs obsolètes d'une même PR/branche (SPEC-ORCHESTRATION §5.4).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+
+    # Postgres 16 prêt pour les tests d'intégration API/DB (M0-04+ / M1).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: brasso
+          POSTGRES_PASSWORD: brasso
+          POSTGRES_DB: brasso_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brasso"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://brasso:brasso@localhost:5432/brasso_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Couverture core >= 90 % : la gate est branchée par M1-14 (via `turbo run test`).
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
