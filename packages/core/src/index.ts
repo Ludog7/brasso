@@ -26,3 +26,6 @@ export * from "./formulas/mash.js";
 
 // Formules brassicoles — mesures densimètre / réfractomètre Terrill (M1-09, FORMULES §7).
 export * from "./formulas/measurements.js";
+
+// Formules brassicoles — carbonatation : priming, keg PSI, CO₂ résiduel (M1-10, FORMULES §8).
+export * from "./formulas/carbonation.js";
