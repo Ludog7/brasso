@@ -32,3 +32,9 @@ export * from "./formulas/carbonation.js";
 
 // Formules brassicoles — post-mortem : rendement, atténuation, dilution, blend (M1-11, FORMULES §9).
 export * from "./formulas/postmortem.js";
+
+// Types d'entrée des recettes par moteur (M1-12, ADR-06).
+export * from "./schemas/recipe.js";
+
+// Moteurs de calcul BEER / ALT_FERMENTED / SOFT_DRINK + dispatcher (M1-12, ADR-06/ADR-11).
+export * from "./engines/index.js";
