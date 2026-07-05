@@ -38,3 +38,6 @@ export * from "./schemas/recipe.js";
 
 // Moteurs de calcul BEER / ALT_FERMENTED / SOFT_DRINK + dispatcher (M1-12, ADR-06/ADR-11).
 export * from "./engines/index.js";
+
+// State Machine Jour J pure — phases, transitions, timers sanctuarisés (M1-13, ADR-08).
+export * from "./stateMachine/index.js";
