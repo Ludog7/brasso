@@ -41,3 +41,6 @@ export * from "./engines/index.js";
 
 // State Machine Jour J pure — phases, transitions, timers sanctuarisés (M1-13, ADR-08).
 export * from "./stateMachine/index.js";
+
+// Données de référence statiques — styles BJCP (M2-04, seed M1-02 côté DB).
+export * from "./reference/index.js";
