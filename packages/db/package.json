@@ -30,6 +30,7 @@
     "seed": "tsx seed/seed.ts"
   },
   "dependencies": {
+    "@brasso/core": "workspace:*",
     "@prisma/client": "^6.1.0"
   },
   "devDependencies": {
