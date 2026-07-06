@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 
+import type { RecipeEngine } from "@brasso/core";
+import { ingredientAllowedForEngine, stepAllowedForEngine } from "@brasso/core";
+
 import type {
   RecipeCreateData,
   RecipeListFilters,
@@ -9,7 +12,7 @@ import type {
   RecipeWithDetails,
 } from "./repository.js";
 import type { RecipeCreateBody } from "./schema.js";
-import { recipeUpdateBodyByEngine } from "./schema.js";
+import { recipeUpdateBodyByEngine, replaceIngredientsBody, replaceStepsBody } from "./schema.js";
 
 /**
  * Recette introuvable → 404. Le `statusCode`/`code` sont lus par l'error handler
@@ -38,6 +41,19 @@ export class RecipeNotDraftError extends Error {
 }
 
 /**
+ * Sous-ressource incohérente avec le moteur de la recette (M2-02, ADR-06) : ex.
+ * un houblon ou un palier d'empâtage sur une recette non-BEER → 400.
+ */
+export class RecipeEngineMismatchError extends Error {
+  readonly statusCode = 400;
+  readonly code = "ENGINE_MISMATCH";
+  constructor(engine: RecipeEngine, detail: string) {
+    super(`Élément incompatible avec le moteur ${engine} : ${detail}`);
+    this.name = "RecipeEngineMismatchError";
+  }
+}
+
+/**
  * Orchestration métier du CRUD recettes (M2-01). Impose les invariants serveur :
  * création toujours en `DRAFT` version 1 avec une nouvelle `familyId` ; PATCH/
  * DELETE réservés aux brouillons. La validation Zod du corps a lieu ici pour la
@@ -45,6 +61,17 @@ export class RecipeNotDraftError extends Error {
  */
 export class RecipeService {
   constructor(private readonly repo: RecipeRepository) {}
+
+  private async requireDraft(id: string): Promise<RecipeWithDetails> {
+    const existing = await this.repo.findById(id);
+    if (!existing) {
+      throw new RecipeNotFoundError(id);
+    }
+    if (existing.status !== "DRAFT") {
+      throw new RecipeNotDraftError(id);
+    }
+    return existing;
+  }
 
   list(filters: RecipeListFilters): Promise<RecipeSummary[]> {
     return this.repo.list(filters);
@@ -72,13 +99,7 @@ export class RecipeService {
   }
 
   async update(id: string, rawBody: unknown): Promise<RecipeWithDetails> {
-    const existing = await this.repo.findById(id);
-    if (!existing) {
-      throw new RecipeNotFoundError(id);
-    }
-    if (existing.status !== "DRAFT") {
-      throw new RecipeNotDraftError(id);
-    }
+    const existing = await this.requireDraft(id);
     // La forme du patch dépend du moteur : `.strict()` rejette un détail d'un
     // autre moteur (ZodError → 400 via l'error handler).
     const data: RecipeUpdateData = recipeUpdateBodyByEngine[existing.engine].parse(rawBody);
@@ -86,13 +107,38 @@ export class RecipeService {
   }
 
   async remove(id: string): Promise<void> {
-    const existing = await this.repo.findById(id);
-    if (!existing) {
-      throw new RecipeNotFoundError(id);
-    }
-    if (existing.status !== "DRAFT") {
-      throw new RecipeNotDraftError(id);
-    }
+    await this.requireDraft(id);
     await this.repo.delete(id);
+  }
+
+  /**
+   * Remplace intégralement la liste ordonnée des ingrédients d'un brouillon.
+   * Rejette (400) toute catégorie incohérente avec le moteur (houblon hors BEER…).
+   */
+  async replaceIngredients(id: string, rawBody: unknown): Promise<RecipeWithDetails> {
+    const existing = await this.requireDraft(id);
+    const { ingredients } = replaceIngredientsBody.parse(rawBody);
+    const offending = ingredients.find(
+      (item) => !ingredientAllowedForEngine(existing.engine, item.category),
+    );
+    if (offending) {
+      throw new RecipeEngineMismatchError(existing.engine, `catégorie ${offending.category}`);
+    }
+    return this.repo.replaceIngredients(id, ingredients);
+  }
+
+  /**
+   * Remplace intégralement les étapes de process ordonnées d'un brouillon.
+   * Rejette (400) tout type d'étape incohérent avec le moteur (palier hors BEER,
+   * `STABILIZE` sur BEER…).
+   */
+  async replaceSteps(id: string, rawBody: unknown): Promise<RecipeWithDetails> {
+    const existing = await this.requireDraft(id);
+    const { steps } = replaceStepsBody.parse(rawBody);
+    const offending = steps.find((item) => !stepAllowedForEngine(existing.engine, item.type));
+    if (offending) {
+      throw new RecipeEngineMismatchError(existing.engine, `étape ${offending.type}`);
+    }
+    return this.repo.replaceSteps(id, steps);
   }
 }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { RecipeIngredientInput, RecipeStepInput } from "@brasso/core";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -172,6 +173,51 @@ class InMemoryRecipeRepository implements RecipeRepository {
   delete(id: string): Promise<void> {
     this.store.delete(id);
     return Promise.resolve();
+  }
+
+  replaceIngredients(recipeId: string, items: RecipeIngredientInput[]): Promise<RecipeWithDetails> {
+    const existing = this.store.get(recipeId);
+    if (!existing) {
+      throw new Error(`recette ${recipeId} absente (le service garantit son existence)`);
+    }
+    const updated: RecipeWithDetails = {
+      ...existing,
+      updatedAt: new Date(),
+      ingredients: items.map((it, index) => ({
+        id: `${recipeId}_ing_${index}`,
+        catalogItemId: it.catalogItemId ?? null,
+        name: it.name,
+        category: it.category,
+        use: it.use ?? null,
+        amount: it.amount,
+        unit: it.unit,
+        timeMinutes: it.timeMinutes ?? null,
+        sortOrder: index,
+        params: it.params ?? null,
+      })),
+    };
+    this.store.set(recipeId, updated);
+    return Promise.resolve(updated);
+  }
+
+  replaceSteps(recipeId: string, items: RecipeStepInput[]): Promise<RecipeWithDetails> {
+    const existing = this.store.get(recipeId);
+    if (!existing) {
+      throw new Error(`recette ${recipeId} absente (le service garantit son existence)`);
+    }
+    const updated: RecipeWithDetails = {
+      ...existing,
+      updatedAt: new Date(),
+      steps: items.map((it, index) => ({
+        id: `${recipeId}_step_${index}`,
+        type: it.type,
+        name: it.name ?? null,
+        sortOrder: index,
+        params: it.params ?? null,
+      })),
+    };
+    this.store.set(recipeId, updated);
+    return Promise.resolve(updated);
   }
 }
 
@@ -497,6 +543,207 @@ describe("module recipes — CRUD des brouillons (M2-01)", () => {
       const res = await inject(app, "POST", "/api/recipes", { payload: BEER_BODY });
       expect(res.statusCode).toBe(401);
       expect(res.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
+    } finally {
+      await close();
+    }
+  });
+
+  // ── Sous-ressources : ingrédients & étapes (M2-02) ──────────────────────────
+
+  const createRecipe = async (payload: unknown): Promise<string> => {
+    const res = await inject(app, "POST", "/api/recipes", {
+      cookie: cookieFor("brasseur"),
+      payload,
+    });
+    return res.json().recipe.id;
+  };
+
+  const MALTS_AND_HOPS: RecipeIngredientInput[] = [
+    {
+      category: "MALT",
+      name: "Pilsner",
+      amount: 4000,
+      params: { colorEbc: 4, potentialSg: 1.037 },
+    },
+    {
+      category: "HOP",
+      name: "Saaz",
+      amount: 30,
+      use: "BOIL",
+      timeMinutes: 60,
+      params: { alphaFraction: 0.035 },
+    },
+  ];
+
+  it("BEER : PUT ingredients pose malts + houblons, ordonnés (critère fonctionnel)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const res = await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: { ingredients: MALTS_AND_HOPS },
+      });
+      expect(res.statusCode).toBe(200);
+      const { ingredients } = res.json().recipe;
+      expect(ingredients).toHaveLength(2);
+      expect(ingredients.map((i: { sortOrder: number }) => i.sortOrder)).toEqual([0, 1]);
+      expect(ingredients[0]).toMatchObject({ category: "MALT", name: "Pilsner" });
+      expect(ingredients[1]).toMatchObject({ category: "HOP", params: { alphaFraction: 0.035 } });
+    } finally {
+      await close();
+    }
+  });
+
+  it("BEER : PUT steps pose un palier d'empâtage + ébullition, ordonnés", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const steps: RecipeStepInput[] = [
+        { type: "MASH_STEP", name: "Saccharification", params: { tempC: 67, timeMin: 60 } },
+        { type: "BOIL", params: { timeMin: 60 } },
+      ];
+      const res = await inject(app, "PUT", `/api/recipes/${id}/steps`, {
+        cookie: cookieFor("brasseur"),
+        payload: { steps },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().recipe.steps).toHaveLength(2);
+      expect(res.json().recipe.steps[0]).toMatchObject({ type: "MASH_STEP", sortOrder: 0 });
+    } finally {
+      await close();
+    }
+  });
+
+  it("ALT : PUT steps accepte une étape stabilize (critère fonctionnel)", async () => {
+    try {
+      const id = await createRecipe(ALT_BODY);
+      const res = await inject(app, "PUT", `/api/recipes/${id}/steps`, {
+        cookie: cookieFor("brasseur"),
+        payload: { steps: [{ type: "STABILIZE", params: { method: "PASTEURIZATION" } }] },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().recipe.steps[0]).toMatchObject({ type: "STABILIZE" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("un second PUT remplace intégralement (pas d'accumulation)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: { ingredients: MALTS_AND_HOPS },
+      });
+      const res = await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: { ingredients: [{ category: "MALT", name: "Vienna", amount: 1000 }] },
+      });
+      expect(res.json().recipe.ingredients).toHaveLength(1);
+      expect(res.json().recipe.ingredients[0]).toMatchObject({ name: "Vienna" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("ALT : un houblon est rejeté (400, incohérent avec le moteur)", async () => {
+    try {
+      const id = await createRecipe(ALT_BODY);
+      const res = await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: {
+          ingredients: [
+            {
+              category: "HOP",
+              name: "Saaz",
+              amount: 10,
+              use: "BOIL",
+              params: { alphaFraction: 0.04 },
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { code: "ENGINE_MISMATCH" } });
+    } finally {
+      await close();
+    }
+  });
+
+  it("BEER : une étape STABILIZE est rejetée (400, réservée ALT/SOFT)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const res = await inject(app, "PUT", `/api/recipes/${id}/steps`, {
+        cookie: cookieFor("brasseur"),
+        payload: { steps: [{ type: "STABILIZE" }] },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { code: "ENGINE_MISMATCH" } });
+    } finally {
+      await close();
+    }
+  });
+
+  it("houblon sans α → 400 (validation de params par catégorie)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const res = await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: {
+          ingredients: [{ category: "HOP", name: "Saaz", amount: 10, use: "BOIL", params: {} }],
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { code: "VALIDATION" } });
+    } finally {
+      await close();
+    }
+  });
+
+  it("PUT sur une recette non-DRAFT → 409", async () => {
+    try {
+      const now = new Date();
+      recipes.insert({
+        id: "pub_2",
+        familyId: "fam_pub2",
+        version: 1,
+        name: "Publiée",
+        engine: "BEER",
+        status: "PUBLISHED",
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+        beerDetails: {
+          styleBjcp: null,
+          targetOg: null,
+          targetFg: null,
+          targetIbu: null,
+          targetEbc: null,
+          boilTimeMin: null,
+          efficiency: null,
+          batchVolumeL: null,
+        } satisfies BeerDetailsView,
+        altDetails: null,
+        softDetails: null,
+        ingredients: [],
+        steps: [],
+      });
+      const res = await inject(app, "PUT", "/api/recipes/pub_2/ingredients", {
+        cookie: cookieFor("brasseur"),
+        payload: { ingredients: [] },
+      });
+      expect(res.statusCode).toBe(409);
+    } finally {
+      await close();
+    }
+  });
+
+  it("caisse ne peut pas modifier les sous-ressources (403)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const res = await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("caisse"),
+        payload: { ingredients: [] },
+      });
+      expect(res.statusCode).toBe(403);
     } finally {
       await close();
     }

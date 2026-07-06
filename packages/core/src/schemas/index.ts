@@ -6,5 +6,6 @@ export * from "./batch.js";
 export * from "./enums.js";
 export * from "./measurement.js";
 export * from "./recipe.js";
+export * from "./recipeParts.js";
 export * from "./recipeSchema.js";
 export * from "./stock.js";

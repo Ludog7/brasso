@@ -16,7 +16,9 @@ import {
   altDetailsSchema,
   beerDetailsSchema,
   recipeEngineSchema,
+  recipeIngredientInputSchema,
   recipeStatusSchema,
+  recipeStepInputSchema,
   softDetailsSchema,
 } from "@brasso/core";
 import { z } from "zod";
@@ -80,6 +82,18 @@ export const recipeUpdateBodyByEngine = {
   ALT_FERMENTED: recipeUpdateCommon.extend({ altDetails: altDetailsPatch.optional() }).strict(),
   SOFT_DRINK: recipeUpdateCommon.extend({ softDetails: softDetailsPatch.optional() }).strict(),
 } as const;
+
+/** Corps du remplacement complet des ingrédients (`PUT …/ingredients`). */
+export const replaceIngredientsBody = z.object({
+  ingredients: z.array(recipeIngredientInputSchema),
+});
+export type ReplaceIngredientsBody = z.infer<typeof replaceIngredientsBody>;
+
+/** Corps du remplacement complet des étapes de process (`PUT …/steps`). */
+export const replaceStepsBody = z.object({
+  steps: z.array(recipeStepInputSchema),
+});
+export type ReplaceStepsBody = z.infer<typeof replaceStepsBody>;
 
 export type BeerDetailsInput = z.infer<typeof beerDetailsSchema>;
 export type AltDetailsInput = z.infer<typeof altDetailsSchema>;

@@ -40,6 +40,21 @@ export const ingredientUseSchema = z.enum([
   "OTHER",
 ]);
 
+/** Type d'étape de process d'une recette (Prisma `ProcessStepType`). */
+export const processStepTypeSchema = z.enum([
+  "MASH",
+  "MASH_STEP",
+  "SPARGE",
+  "BOIL",
+  "WHIRLPOOL",
+  "COOL",
+  "FERMENT",
+  "STABILIZE",
+  "CONDITION",
+  "PACKAGE",
+  "OTHER",
+]);
+
 /** Statut d'un batch (Prisma `BatchStatus`). */
 export const batchStatusSchema = z.enum([
   "PLANIFIE",
@@ -84,6 +99,7 @@ export type RecipeEngine = z.infer<typeof recipeEngineSchema>;
 export type RecipeStatus = z.infer<typeof recipeStatusSchema>;
 export type IngredientCategory = z.infer<typeof ingredientCategorySchema>;
 export type IngredientUse = z.infer<typeof ingredientUseSchema>;
+export type ProcessStepType = z.infer<typeof processStepTypeSchema>;
 export type BatchStatus = z.infer<typeof batchStatusSchema>;
 export type MeasureType = z.infer<typeof measureTypeSchema>;
 export type CatalogKind = z.infer<typeof catalogKindSchema>;
