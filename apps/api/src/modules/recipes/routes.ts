@@ -51,4 +51,19 @@ export const recipesRoutes: FastifyPluginAsync<RecipesRoutesOptions> = async (ap
     await service.remove(id);
     return reply.code(204).send();
   });
+
+  // Sous-ressources (M2-02) : remplacement complet ordonné, DRAFT uniquement.
+  app.put(
+    "/recipes/:id/ingredients",
+    { config: app.rbac("recettes", "update") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      return { recipe: await service.replaceIngredients(id, request.body) };
+    },
+  );
+
+  app.put("/recipes/:id/steps", { config: app.rbac("recettes", "update") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { recipe: await service.replaceSteps(id, request.body) };
+  });
 };

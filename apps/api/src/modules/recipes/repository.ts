@@ -1,3 +1,4 @@
+import type { RecipeIngredientInput, RecipeStepInput } from "@brasso/core";
 import type {
   IngredientCategory,
   IngredientUse,
@@ -133,6 +134,10 @@ export interface RecipeRepository {
   create(data: RecipeCreateData): Promise<RecipeWithDetails>;
   update(id: string, data: RecipeUpdateData): Promise<RecipeWithDetails>;
   delete(id: string): Promise<void>;
+  /** Remplace la liste ordonnée des ingrédients (transactionnel). `sortOrder` = index. */
+  replaceIngredients(recipeId: string, items: RecipeIngredientInput[]): Promise<RecipeWithDetails>;
+  /** Remplace la liste ordonnée des étapes de process (transactionnel). `sortOrder` = index. */
+  replaceSteps(recipeId: string, items: RecipeStepInput[]): Promise<RecipeWithDetails>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,4 +252,58 @@ export class PrismaRecipeRepository implements RecipeRepository {
     // Détails/ingrédients/steps sont supprimés en cascade (onDelete: Cascade).
     await this.prisma.recipe.delete({ where: { id } });
   }
+
+  replaceIngredients(recipeId: string, items: RecipeIngredientInput[]): Promise<RecipeWithDetails> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.recipeIngredient.deleteMany({ where: { recipeId } });
+      if (items.length > 0) {
+        await tx.recipeIngredient.createMany({
+          data: items.map((it, index) => ({
+            recipeId,
+            name: it.name,
+            category: it.category,
+            use: it.use ?? null,
+            amount: it.amount,
+            unit: it.unit,
+            timeMinutes: it.timeMinutes ?? null,
+            params: toJson(it.params),
+            catalogItemId: it.catalogItemId ?? null,
+            sortOrder: index,
+          })),
+        });
+      }
+      const row = await tx.recipe.findUniqueOrThrow({
+        where: { id: recipeId },
+        include: DETAIL_INCLUDE,
+      });
+      return toDetail(row);
+    });
+  }
+
+  replaceSteps(recipeId: string, items: RecipeStepInput[]): Promise<RecipeWithDetails> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.recipeProcessStep.deleteMany({ where: { recipeId } });
+      if (items.length > 0) {
+        await tx.recipeProcessStep.createMany({
+          data: items.map((it, index) => ({
+            recipeId,
+            type: it.type,
+            name: it.name ?? null,
+            params: toJson(it.params),
+            sortOrder: index,
+          })),
+        });
+      }
+      const row = await tx.recipe.findUniqueOrThrow({
+        where: { id: recipeId },
+        include: DETAIL_INCLUDE,
+      });
+      return toDetail(row);
+    });
+  }
+}
+
+/** Normalise un `params` validé vers l'entrée JSON Prisma (`undefined` = colonne inchangée/null). */
+function toJson(value: unknown): Prisma.InputJsonValue | undefined {
+  return value === undefined ? undefined : (value as Prisma.InputJsonValue);
 }
