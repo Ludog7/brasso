@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import type { RecipeEngine } from "@brasso/core";
-import { ingredientAllowedForEngine, stepAllowedForEngine } from "@brasso/core";
+import type { RecipeEngine, RecipePublicationInput } from "@brasso/core";
+import {
+  ingredientAllowedForEngine,
+  recipePublicationCheck,
+  stepAllowedForEngine,
+} from "@brasso/core";
 
 import type {
   RecipeCreateData,
@@ -50,6 +54,41 @@ export class RecipeEngineMismatchError extends Error {
   constructor(engine: RecipeEngine, detail: string) {
     super(`Élément incompatible avec le moteur ${engine} : ${detail}`);
     this.name = "RecipeEngineMismatchError";
+  }
+}
+
+/** Transition invalide : action réservée à une recette `PUBLISHED` (ADR-07) → 409. */
+export class RecipeNotPublishedError extends Error {
+  readonly statusCode = 409;
+  readonly code = "RECIPE_NOT_PUBLISHED";
+  constructor(id: string) {
+    super(`La recette ${id} n'est pas publiée : action réservée à une recette PUBLISHED`);
+    this.name = "RecipeNotPublishedError";
+  }
+}
+
+/** Un brouillon existe déjà dans la famille : nouvelle version refusée (ADR-07) → 409. */
+export class DraftAlreadyExistsError extends Error {
+  readonly statusCode = 409;
+  readonly code = "DRAFT_ALREADY_EXISTS";
+  constructor(familyId: string) {
+    super(`Un brouillon (DRAFT) existe déjà dans la famille ${familyId} : éditez-le`);
+    this.name = "DraftAlreadyExistsError";
+  }
+}
+
+/**
+ * Publication refusée par les règles `core` (ADR-06) → 422. Les manquements sont
+ * exposés dans `details.errors` (repris par l'error handler pour les statuts < 500).
+ */
+export class RecipeNotPublishableError extends Error {
+  readonly statusCode = 422;
+  readonly code = "NOT_PUBLISHABLE";
+  readonly details: { errors: readonly string[] };
+  constructor(errors: readonly string[]) {
+    super("Recette non publiable en l'état (règles core)");
+    this.name = "RecipeNotPublishableError";
+    this.details = { errors };
   }
 }
 
@@ -140,5 +179,71 @@ export class RecipeService {
       throw new RecipeEngineMismatchError(existing.engine, `étape ${offending.type}`);
     }
     return this.repo.replaceSteps(id, steps);
+  }
+
+  /**
+   * Publie un brouillon (`DRAFT → PUBLISHED`) après validation des règles `core`
+   * (ADR-06). Échec des règles → 422 avec la liste des manquements.
+   */
+  async publish(id: string): Promise<RecipeWithDetails> {
+    const existing = await this.requireDraft(id);
+    const check = recipePublicationCheck(publicationInput(existing));
+    if (!check.publishable) {
+      throw new RecipeNotPublishableError(check.errors);
+    }
+    return this.repo.updateStatus(id, "PUBLISHED");
+  }
+
+  /**
+   * Crée une nouvelle version depuis une recette `PUBLISHED` : copie profonde en
+   * `DRAFT` version n+1 dans la même famille. Refus (409) si la source n'est pas
+   * publiée ou si un brouillon existe déjà dans la famille (unicité, ADR-07).
+   */
+  async createNewVersion(id: string): Promise<RecipeWithDetails> {
+    const source = await this.repo.findById(id);
+    if (!source) {
+      throw new RecipeNotFoundError(id);
+    }
+    if (source.status !== "PUBLISHED") {
+      throw new RecipeNotPublishedError(id);
+    }
+    const existingDraft = await this.repo.findDraftInFamily(source.familyId);
+    if (existingDraft) {
+      throw new DraftAlreadyExistsError(source.familyId);
+    }
+    return this.repo.createNextVersion(id);
+  }
+
+  /** Archive une recette publiée (`PUBLISHED → ARCHIVED`, ADR-07). */
+  async archive(id: string): Promise<RecipeWithDetails> {
+    const source = await this.repo.findById(id);
+    if (!source) {
+      throw new RecipeNotFoundError(id);
+    }
+    if (source.status !== "PUBLISHED") {
+      throw new RecipeNotPublishedError(id);
+    }
+    return this.repo.updateStatus(id, "ARCHIVED");
+  }
+}
+
+/** Projette une recette persistée vers les seuls champs pertinents pour la publication. */
+function publicationInput(recipe: RecipeWithDetails): RecipePublicationInput {
+  switch (recipe.engine) {
+    case "ALT_FERMENTED":
+      return {
+        engine: "ALT_FERMENTED",
+        ph: recipe.altDetails?.targetPh ?? null,
+        stabilizationMethod: recipe.altDetails?.stabilizationMethod ?? null,
+      };
+    case "SOFT_DRINK":
+      return {
+        engine: "SOFT_DRINK",
+        ph: recipe.softDetails?.targetPh ?? null,
+        storageMode: (recipe.softDetails?.storageMode as "cold" | "ambient" | null) ?? null,
+        stabilizationMethod: recipe.softDetails?.stabilizationMethod ?? null,
+      };
+    case "BEER":
+      return { engine: "BEER" };
   }
 }

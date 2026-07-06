@@ -66,4 +66,26 @@ export const recipesRoutes: FastifyPluginAsync<RecipesRoutesOptions> = async (ap
     const { id } = idParams.parse(request.params);
     return { recipe: await service.replaceSteps(id, request.body) };
   });
+
+  // Cycle de vie (M2-03, ADR-07). Transitions strictes DRAFT → PUBLISHED → ARCHIVED.
+  app.post("/recipes/:id/publish", { config: app.rbac("recettes", "update") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { recipe: await service.publish(id) };
+  });
+
+  app.post(
+    "/recipes/:id/new-version",
+    // Crée un nouveau brouillon : action de création dans la famille.
+    { config: app.rbac("recettes", "create") },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const recipe = await service.createNewVersion(id);
+      return reply.code(201).send({ recipe });
+    },
+  );
+
+  app.post("/recipes/:id/archive", { config: app.rbac("recettes", "update") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { recipe: await service.archive(id) };
+  });
 };

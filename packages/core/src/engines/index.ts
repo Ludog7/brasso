@@ -14,6 +14,7 @@ import { computeSoftDrink, type SoftResult } from "./softDrink.js";
 export * from "./altFermented.js";
 export * from "./beer.js";
 export * from "./common.js";
+export * from "./publication.js";
 export * from "./softDrink.js";
 
 /** Résultat d'un moteur, discriminé par `engine`. */

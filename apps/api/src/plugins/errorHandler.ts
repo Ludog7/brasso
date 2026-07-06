@@ -39,7 +39,13 @@ export default fp(
       const message = status >= 500 && isProd ? "Erreur interne du serveur" : error.message;
       const code = error.code ?? (status >= 500 ? "INTERNAL" : "ERROR");
 
-      reply.status(status).send({ error: { code, message } });
+      // Certaines erreurs métier (< 500) portent un `details` structuré (ex. la
+      // liste des manquements d'une publication refusée). Jamais exposé en 5xx.
+      const details = (error as { details?: unknown }).details;
+      const body =
+        status < 500 && details !== undefined ? { code, message, details } : { code, message };
+
+      reply.status(status).send({ error: body });
     });
 
     done();

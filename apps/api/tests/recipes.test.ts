@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { RecipeIngredientInput, RecipeStepInput } from "@brasso/core";
+import type { RecipeIngredientInput, RecipeStatus, RecipeStepInput } from "@brasso/core";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -218,6 +218,52 @@ class InMemoryRecipeRepository implements RecipeRepository {
     };
     this.store.set(recipeId, updated);
     return Promise.resolve(updated);
+  }
+
+  updateStatus(id: string, status: RecipeStatus): Promise<RecipeWithDetails> {
+    const existing = this.store.get(id);
+    if (!existing) {
+      throw new Error(`recette ${id} absente (le service garantit son existence)`);
+    }
+    const updated: RecipeWithDetails = { ...existing, status, updatedAt: new Date() };
+    this.store.set(id, updated);
+    return Promise.resolve(updated);
+  }
+
+  findDraftInFamily(familyId: string): Promise<RecipeSummary | null> {
+    const draft = [...this.store.values()].find(
+      (r) => r.familyId === familyId && r.status === "DRAFT",
+    );
+    return Promise.resolve(draft ? toSummary(draft) : null);
+  }
+
+  createNextVersion(sourceId: string): Promise<RecipeWithDetails> {
+    const src = this.store.get(sourceId);
+    if (!src) {
+      throw new Error(`recette ${sourceId} absente (le service garantit son existence)`);
+    }
+    const nextVersion =
+      Math.max(
+        ...[...this.store.values()]
+          .filter((r) => r.familyId === src.familyId)
+          .map((r) => r.version),
+      ) + 1;
+    const id = `rec_${++this.seq}`;
+    const copy: RecipeWithDetails = {
+      ...src,
+      id,
+      version: nextVersion,
+      status: "DRAFT",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      beerDetails: src.beerDetails ? { ...src.beerDetails } : null,
+      altDetails: src.altDetails ? { ...src.altDetails } : null,
+      softDetails: src.softDetails ? { ...src.softDetails } : null,
+      ingredients: src.ingredients.map((i, index) => ({ ...i, id: `${id}_ing_${index}` })),
+      steps: src.steps.map((s, index) => ({ ...s, id: `${id}_step_${index}` })),
+    };
+    this.store.set(id, copy);
+    return Promise.resolve(copy);
   }
 }
 
@@ -744,6 +790,161 @@ describe("module recipes — CRUD des brouillons (M2-01)", () => {
         payload: { ingredients: [] },
       });
       expect(res.statusCode).toBe(403);
+    } finally {
+      await close();
+    }
+  });
+
+  // ── Versioning & publication (M2-03) ────────────────────────────────────────
+
+  const publish = (id: string, user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", `/api/recipes/${id}/publish`, { cookie: cookieFor(user) });
+
+  it("BEER : publie un DRAFT (DRAFT → PUBLISHED)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const res = await publish(id);
+      expect(res.statusCode).toBe(200);
+      expect(res.json().recipe).toMatchObject({ id, status: "PUBLISHED" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("ALT sans stabilisation → 422 avec la liste des manquements", async () => {
+    try {
+      const id = await createRecipe({
+        engine: "ALT_FERMENTED",
+        name: "Ginger",
+        altDetails: { baseType: "gingembre", targetPh: 3.4 }, // pas de stabilizationMethod
+      });
+      const res = await publish(id);
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error.code).toBe("NOT_PUBLISHABLE");
+      expect(res.json().error.details.errors.join(" ")).toContain("Stabilisation obligatoire");
+    } finally {
+      await close();
+    }
+  });
+
+  it("ALT complète (pH + stabilisation) → publiable", async () => {
+    try {
+      const id = await createRecipe(ALT_BODY); // porte stabilizationMethod + targetPh
+      expect((await publish(id)).statusCode).toBe(200);
+    } finally {
+      await close();
+    }
+  });
+
+  it("cycle complet : v1 publiée, v2 DRAFT, modifiée, republiée — v1 intacte", async () => {
+    try {
+      const v1 = await createRecipe(BEER_BODY);
+      await inject(app, "PUT", `/api/recipes/${v1}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: { ingredients: MALTS_AND_HOPS },
+      });
+      expect((await publish(v1)).statusCode).toBe(200);
+
+      // Nouvelle version : copie profonde en DRAFT v2.
+      const nv = await inject(app, "POST", `/api/recipes/${v1}/new-version`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(nv.statusCode).toBe(201);
+      const v2 = nv.json().recipe;
+      expect(v2).toMatchObject({ version: 2, status: "DRAFT" });
+      expect(v2.familyId).toBe(nv.json().recipe.familyId);
+      expect(v2.id).not.toBe(v1);
+      // Copie profonde : les ingrédients ont suivi.
+      expect(v2.ingredients).toHaveLength(2);
+
+      // Modifier v2 puis republier.
+      await inject(app, "PATCH", `/api/recipes/${v2.id}`, {
+        cookie: cookieFor("brasseur"),
+        payload: { name: "Pale Ale v2" },
+      });
+      expect((await publish(v2.id)).statusCode).toBe(200);
+
+      // v1 reste intacte (PUBLISHED, nom d'origine).
+      const readV1 = await inject(app, "GET", `/api/recipes/${v1}`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(readV1.json().recipe).toMatchObject({ status: "PUBLISHED", name: "Pale Ale maison" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("new-version : refusée si un DRAFT existe déjà dans la famille (409)", async () => {
+    try {
+      const v1 = await createRecipe(BEER_BODY);
+      await publish(v1);
+      expect(
+        (
+          await inject(app, "POST", `/api/recipes/${v1}/new-version`, {
+            cookie: cookieFor("brasseur"),
+          })
+        ).statusCode,
+      ).toBe(201);
+      // Un DRAFT (v2) existe désormais → seconde tentative refusée.
+      const second = await inject(app, "POST", `/api/recipes/${v1}/new-version`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(second.statusCode).toBe(409);
+      expect(second.json().error.code).toBe("DRAFT_ALREADY_EXISTS");
+    } finally {
+      await close();
+    }
+  });
+
+  it("new-version : refusée depuis un DRAFT (409, source non publiée)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      const res = await inject(app, "POST", `/api/recipes/${id}/new-version`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.code).toBe("RECIPE_NOT_PUBLISHED");
+    } finally {
+      await close();
+    }
+  });
+
+  it("archive : PUBLISHED → ARCHIVED, puis immuable (PATCH → 409)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      await publish(id);
+      const arch = await inject(app, "POST", `/api/recipes/${id}/archive`, {
+        cookie: cookieFor("admin"),
+      });
+      expect(arch.statusCode).toBe(200);
+      expect(arch.json().recipe.status).toBe("ARCHIVED");
+
+      // Immuabilité : plus aucune écriture.
+      const patch = await inject(app, "PATCH", `/api/recipes/${id}`, {
+        cookie: cookieFor("admin"),
+        payload: { name: "x" },
+      });
+      expect(patch.statusCode).toBe(409);
+    } finally {
+      await close();
+    }
+  });
+
+  it("publier puis re-publier → 409 (transition invalide)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      await publish(id);
+      // La recette est PUBLISHED : republier repasse par requireDraft → 409.
+      expect((await publish(id)).statusCode).toBe(409);
+    } finally {
+      await close();
+    }
+  });
+
+  it("caisse ne peut pas publier (403)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      expect((await publish(id, "caisse")).statusCode).toBe(403);
     } finally {
       await close();
     }

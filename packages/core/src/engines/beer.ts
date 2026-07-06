@@ -10,6 +10,7 @@ import { calcIbu } from "../formulas/ibu.js";
 import type { BeerRecipe } from "../schemas/recipe.js";
 import { points } from "../units.js";
 import { type GaugeStatus, gaugeStatus, type PublicationCheck } from "./common.js";
+import { recipePublicationCheck } from "./publication.js";
 
 /** Jauges d'alignement aux plages BJCP (§ spec). */
 export interface BeerGauges {
@@ -64,7 +65,7 @@ export function computeBeer(recipe: BeerRecipe): BeerResult {
       ibu: gaugeStatus(ibu, style.ibuMin, style.ibuMax),
       ebc: gaugeStatus(ebc, style.ebcMin, style.ebcMax),
     },
-    // Le moteur BEER n'impose pas de règle de publication `core` (contrôles en M2).
-    publication: { publishable: true, errors: [] },
+    // Le moteur BEER n'impose pas de règle de publication `core`.
+    publication: recipePublicationCheck({ engine: "BEER" }),
   };
 }
