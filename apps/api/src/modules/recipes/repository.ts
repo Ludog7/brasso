@@ -138,6 +138,12 @@ export interface RecipeRepository {
   replaceIngredients(recipeId: string, items: RecipeIngredientInput[]): Promise<RecipeWithDetails>;
   /** Remplace la liste ordonnée des étapes de process (transactionnel). `sortOrder` = index. */
   replaceSteps(recipeId: string, items: RecipeStepInput[]): Promise<RecipeWithDetails>;
+  /** Change le statut d'une recette (transitions garanties par le service). */
+  updateStatus(id: string, status: RecipeStatus): Promise<RecipeWithDetails>;
+  /** Un brouillon existe-t-il déjà dans cette famille ? (unicité du DRAFT, ADR-07) */
+  findDraftInFamily(familyId: string): Promise<RecipeSummary | null>;
+  /** Copie profonde d'une recette en `DRAFT` version n+1, même `familyId` (transactionnel). */
+  createNextVersion(sourceId: string): Promise<RecipeWithDetails>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,6 +305,72 @@ export class PrismaRecipeRepository implements RecipeRepository {
         include: DETAIL_INCLUDE,
       });
       return toDetail(row);
+    });
+  }
+
+  async updateStatus(id: string, status: RecipeStatus): Promise<RecipeWithDetails> {
+    const row = await this.prisma.recipe.update({
+      where: { id },
+      data: { status },
+      include: DETAIL_INCLUDE,
+    });
+    return toDetail(row);
+  }
+
+  findDraftInFamily(familyId: string): Promise<RecipeSummary | null> {
+    return this.prisma.recipe.findFirst({
+      where: { familyId, status: "DRAFT" },
+      select: SUMMARY_SELECT,
+    });
+  }
+
+  createNextVersion(sourceId: string): Promise<RecipeWithDetails> {
+    return this.prisma.$transaction(async (tx) => {
+      const src = toDetail(
+        await tx.recipe.findUniqueOrThrow({ where: { id: sourceId }, include: DETAIL_INCLUDE }),
+      );
+      const { _max } = await tx.recipe.aggregate({
+        where: { familyId: src.familyId },
+        _max: { version: true },
+      });
+      const nextVersion = (_max.version ?? src.version) + 1;
+
+      const created = await tx.recipe.create({
+        data: {
+          familyId: src.familyId,
+          version: nextVersion,
+          name: src.name,
+          engine: src.engine,
+          status: "DRAFT",
+          notes: src.notes,
+          ...(src.beerDetails ? { beerDetails: { create: src.beerDetails } } : {}),
+          ...(src.altDetails ? { altDetails: { create: src.altDetails } } : {}),
+          ...(src.softDetails ? { softDetails: { create: src.softDetails } } : {}),
+          ingredients: {
+            create: src.ingredients.map((i) => ({
+              name: i.name,
+              category: i.category,
+              use: i.use,
+              amount: i.amount,
+              unit: i.unit,
+              timeMinutes: i.timeMinutes,
+              params: toJson(i.params),
+              catalogItemId: i.catalogItemId,
+              sortOrder: i.sortOrder,
+            })),
+          },
+          steps: {
+            create: src.steps.map((s) => ({
+              type: s.type,
+              name: s.name,
+              params: toJson(s.params),
+              sortOrder: s.sortOrder,
+            })),
+          },
+        },
+        include: DETAIL_INCLUDE,
+      });
+      return toDetail(created);
     });
   }
 }

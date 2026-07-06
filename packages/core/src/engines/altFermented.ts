@@ -18,6 +18,7 @@ import {
   phIndicator,
   type PublicationCheck,
 } from "./common.js";
+import { recipePublicationCheck } from "./publication.js";
 
 /** Indicateur de risque de carbonatation résiduelle / surpression (ADR-11). */
 export interface CarbonationRiskIndicator {
@@ -59,20 +60,16 @@ export function computeAltFermented(recipe: AltRecipe): AltResult {
     disclaimer: FOOD_SAFETY_DISCLAIMER,
   };
 
-  const errors: string[] = [];
-  if (recipe.ph === undefined) {
-    errors.push("pH obligatoire pour publier une recette ALT (indicateur sécurité).");
-  }
-  if (!stabilized) {
-    errors.push("Stabilisation obligatoire pour publier une recette ALT (ADR-06).");
-  }
-
   return {
     engine: "ALT_FERMENTED",
     abv,
     attenuation,
     ph,
     carbonationRisk,
-    publication: { publishable: errors.length === 0, errors },
+    publication: recipePublicationCheck({
+      engine: "ALT_FERMENTED",
+      ph: recipe.ph ?? null,
+      stabilizationMethod: recipe.stabilizationMethod ?? null,
+    }),
   };
 }

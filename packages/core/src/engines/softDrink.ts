@@ -14,6 +14,7 @@ import {
   phIndicator,
   type PublicationCheck,
 } from "./common.js";
+import { recipePublicationCheck } from "./publication.js";
 
 /** Indicateurs d'une recette SOFT_DRINK (pas d'ABV/IBU/EBC). */
 export interface SoftResult {
@@ -37,15 +38,6 @@ export function computeSoftDrink(recipe: SoftRecipe): SoftResult {
   const ambient = recipe.storageMode === "ambient";
   const lowAcid = recipe.ph !== undefined && recipe.ph > PH_LOW_ACID_THRESHOLD;
   const stabilizationRequired = ambient && lowAcid;
-  const stabilized = recipe.stabilizationMethod != null;
-
-  const errors: string[] = [];
-  if (recipe.ph === undefined) {
-    errors.push("pH obligatoire pour publier une recette SOFT (indicateur sécurité).");
-  }
-  if (stabilizationRequired && !stabilized) {
-    errors.push("Stabilisation requise pour un stockage ambiant à pH > 4.6 (indicateur sécurité).");
-  }
 
   return {
     engine: "SOFT_DRINK",
@@ -53,6 +45,11 @@ export function computeSoftDrink(recipe: SoftRecipe): SoftResult {
     ph,
     storageMode: recipe.storageMode ?? null,
     stabilizationRequired,
-    publication: { publishable: errors.length === 0, errors },
+    publication: recipePublicationCheck({
+      engine: "SOFT_DRINK",
+      ph: recipe.ph ?? null,
+      storageMode: recipe.storageMode ?? null,
+      stabilizationMethod: recipe.stabilizationMethod ?? null,
+    }),
   };
 }
