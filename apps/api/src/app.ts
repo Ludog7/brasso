@@ -8,6 +8,8 @@ import type { AppConfig } from "./config.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { healthRoutes } from "./modules/health/routes.js";
+import type { RecipeRepository } from "./modules/recipes/repository.js";
+import { recipesRoutes } from "./modules/recipes/routes.js";
 import authPlugin from "./plugins/auth.js";
 import configPlugin from "./plugins/config.js";
 import errorHandler from "./plugins/errorHandler.js";
@@ -18,6 +20,8 @@ export interface BuildAppOptions {
   config?: AppConfig;
   /** Repository d'auth injecté (tests) ; sinon adossé à Prisma. */
   authRepository?: AuthRepository;
+  /** Repository de recettes injecté (tests) ; sinon adossé à Prisma. */
+  recipeRepository?: RecipeRepository;
 }
 
 /**
@@ -45,6 +49,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
+  await app.register(recipesRoutes, { prefix: "/api", repository: opts.recipeRepository });
 
   return app;
 }
