@@ -5,6 +5,9 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useBootstrapSession } from "@/hooks/useAuth";
 import { HomePage } from "@/routes/HomePage";
 import { LoginPage } from "@/routes/LoginPage";
+import { NewRecipePage } from "@/routes/recipes/NewRecipePage";
+import { RecipeEditorPage } from "@/routes/recipes/RecipeEditorPage";
+import { RecipesListPage } from "@/routes/recipes/RecipesListPage";
 import { RequireAuth } from "@/routes/RequireAuth";
 import { Button } from "@/ui/button";
 
@@ -44,6 +47,9 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/recipes" element={<RecipesListPage />} />
+        <Route path="/recipes/new" element={<NewRecipePage />} />
+        <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

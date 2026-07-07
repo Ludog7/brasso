@@ -48,6 +48,7 @@ export default defineConfig({
     // Même origine côté navigateur → pas de CORS, cookie de session conservé.
     proxy: {
       "/auth": { target: apiTarget, changeOrigin: true },
+      "/api": { target: apiTarget, changeOrigin: true },
       "/health": { target: apiTarget, changeOrigin: true },
     },
   },
