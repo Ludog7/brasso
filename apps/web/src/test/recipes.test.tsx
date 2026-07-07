@@ -196,7 +196,8 @@ describe("création d'une recette", () => {
 
 describe("shell éditeur", () => {
   it("modifier le nom lève l'indicateur dirty puis PATCH à l'enregistrement", async () => {
-    const recipe = makeRecipe({ engine: "BEER", name: "IPA maison" });
+    // Moteur générique (ALT_FERMENTED) → shell commun M2-05 (BEER a son éditeur dédié).
+    const recipe = makeRecipe({ engine: "ALT_FERMENTED", name: "IPA maison" });
     recipes.push(recipe);
     installFetch();
     const user = userEvent.setup();

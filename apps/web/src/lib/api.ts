@@ -3,6 +3,17 @@
  * proxy Vite (même origine → cookie de session conservé) ; en prod, Caddy relaie
  * `/auth` vers l'API. `VITE_API_URL` permet de cibler une origine explicite.
  */
+import type {
+  BjcpStyle,
+  CatalogKind,
+  IngredientCategory,
+  IngredientUse,
+  ProcessStepType,
+  RecipeIngredientInput,
+  RecipeStepInput,
+  StockUnit,
+} from "@brasso/core";
+
 const BASE: string = import.meta.env.VITE_API_URL ?? "";
 
 /** Vue publique d'un utilisateur (miroir de `AuthUser` côté API). */
@@ -113,13 +124,36 @@ export interface SoftDetails {
   batchVolumeL: number | null;
 }
 
+/** Ingrédient d'une recette (miroir de `RecipeIngredientView` côté API). */
+export interface RecipeIngredientView {
+  id: string;
+  catalogItemId: string | null;
+  name: string;
+  category: IngredientCategory;
+  use: IngredientUse | null;
+  amount: number;
+  unit: StockUnit;
+  timeMinutes: number | null;
+  sortOrder: number;
+  params: unknown;
+}
+
+/** Étape de process d'une recette (miroir de `RecipeStepView` côté API). */
+export interface RecipeStepView {
+  id: string;
+  type: ProcessStepType;
+  name: string | null;
+  sortOrder: number;
+  params: unknown;
+}
+
 /** Vue détaillée : commun + détail moteur (une seule table 1-1) + sous-ressources. */
 export interface RecipeDetail extends RecipeSummary {
   beerDetails: BeerDetails | null;
   altDetails: AltDetails | null;
   softDetails: SoftDetails | null;
-  ingredients: unknown[];
-  steps: unknown[];
+  ingredients: RecipeIngredientView[];
+  steps: RecipeStepView[];
 }
 
 /**
@@ -168,4 +202,59 @@ export const recipesApi = {
       method: "PATCH",
       body: JSON.stringify(input),
     }).then((r) => r.recipe),
+
+  replaceIngredients: (id: string, ingredients: RecipeIngredientInput[]): Promise<RecipeDetail> =>
+    request<{ recipe: RecipeDetail }>(`/api/recipes/${id}/ingredients`, {
+      method: "PUT",
+      body: JSON.stringify({ ingredients }),
+    }).then((r) => r.recipe),
+
+  replaceSteps: (id: string, steps: RecipeStepInput[]): Promise<RecipeDetail> =>
+    request<{ recipe: RecipeDetail }>(`/api/recipes/${id}/steps`, {
+      method: "PUT",
+      body: JSON.stringify({ steps }),
+    }).then((r) => r.recipe),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Référentiels éditeur (M2-04) — pickers lecture seule : styles BJCP + catalogue.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Vue lecture d'un article de catalogue (miroir de `CatalogItemView` côté API). */
+export interface CatalogItem {
+  id: string;
+  name: string;
+  kind: CatalogKind;
+  category: IngredientCategory | null;
+  unit: StockUnit;
+  /** Attributs techniques (α, couleur EBC, potentiel, atténuation…) en JSONB. */
+  attributes: unknown;
+  defaultUnitCostCents: number | null;
+  reorderThreshold: number | null;
+}
+
+export interface CatalogListParams {
+  kind?: CatalogKind;
+  category?: IngredientCategory;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const referentialsApi = {
+  bjcpStyles: (search?: string): Promise<BjcpStyle[]> => {
+    const suffix = search ? `?search=${encodeURIComponent(search)}` : "";
+    return request<{ styles: BjcpStyle[] }>(`/api/bjcp-styles${suffix}`).then((r) => r.styles);
+  },
+
+  catalogItems: (params: CatalogListParams = {}): Promise<CatalogItem[]> => {
+    const qs = new URLSearchParams();
+    if (params.kind) qs.set("kind", params.kind);
+    if (params.category) qs.set("category", params.category);
+    if (params.search) qs.set("search", params.search);
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ items: CatalogItem[] }>(`/api/catalog-items${suffix}`).then((r) => r.items);
+  },
 };
