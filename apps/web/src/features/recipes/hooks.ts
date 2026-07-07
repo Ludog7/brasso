@@ -1,3 +1,4 @@
+import type { IngredientCategory, RecipeIngredientInput, RecipeStepInput } from "@brasso/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -6,6 +7,7 @@ import {
   type RecipeListFilters,
   recipesApi,
   type RecipeUpdateInput,
+  referentialsApi,
 } from "@/lib/api";
 
 /** Fabrique de clés de cache : une seule racine `recipes` pour invalider large. */
@@ -52,5 +54,59 @@ export function useUpdateRecipe(id: string) {
       qc.setQueryData(recipeKeys.detail(id), recipe);
       void qc.invalidateQueries({ queryKey: recipeKeys.all });
     },
+  });
+}
+
+/** Payload de sauvegarde complète d'un brouillon (détails + sous-ressources). */
+export interface RecipeDraftSave {
+  update: RecipeUpdateInput;
+  ingredients: RecipeIngredientInput[];
+  steps: RecipeStepInput[];
+}
+
+/**
+ * Sauvegarde complète d'un brouillon en une action UI : PATCH des détails puis
+ * remplacement des ingrédients et des étapes (M2-02). Séquentiel — la dernière
+ * réponse porte l'état frais persisté. Un seul `isPending`/`isError` pour le
+ * bouton « Enregistrer » de l'éditeur moteur.
+ */
+export function useSaveRecipeDraft(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: RecipeDraftSave): Promise<RecipeDetail> => {
+      await recipesApi.update(id, payload.update);
+      await recipesApi.replaceIngredients(id, payload.ingredients);
+      return recipesApi.replaceSteps(id, payload.steps);
+    },
+    onSuccess: (recipe) => {
+      qc.setQueryData(recipeKeys.detail(id), recipe);
+      void qc.invalidateQueries({ queryKey: recipeKeys.all });
+    },
+  });
+}
+
+// ── Référentiels éditeur (M2-04) ─────────────────────────────────────────────
+
+export const referentialKeys = {
+  bjcp: (search: string) => ["referentials", "bjcp", search] as const,
+  catalog: (category: IngredientCategory, search: string) =>
+    ["referentials", "catalog", category, search] as const,
+};
+
+/** Styles BJCP (référence statique servie par l'API M2-04). Peu volatile. */
+export function useBjcpStyles(search = "") {
+  return useQuery({
+    queryKey: referentialKeys.bjcp(search),
+    queryFn: () => referentialsApi.bjcpStyles(search || undefined),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Catalogue d'ingrédients filtré par catégorie (picker éditeur). */
+export function useCatalogItems(category: IngredientCategory, search = "") {
+  return useQuery({
+    queryKey: referentialKeys.catalog(category, search),
+    queryFn: () => referentialsApi.catalogItems({ category, search: search || undefined }),
+    staleTime: 5 * 60_000,
   });
 }
