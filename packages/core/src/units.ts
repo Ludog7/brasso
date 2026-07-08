@@ -120,6 +120,42 @@ export function sgFromPoints(p: number): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pourcentage ↔ fraction (ex. acides alpha : 6,2 % ↔ 0.062)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pourcentage → fraction : `0.062 = pctToFraction(6.2)`. */
+export function pctToFraction(pct: number): number {
+  return pct / 100;
+}
+
+/** Fraction → pourcentage : `6.2 = fractionToPct(0.062)`. */
+export function fractionToPct(fraction: number): number {
+  return fraction * 100;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rendement d'extrait ↔ potentiel (conversion BeerXML YIELD % ↔ potentialSg)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Potentiel d'extrait maximal (saccharose, rendement 100 %), en **points/kg/L** —
+ * convention de `potentialSg` (FORMULES §1.2 : « points par kg dilué dans 1 L » ;
+ * malt Pale ≈ 1.037 → 37 points, soit ~80 % de ce maximum). Référence unique pour
+ * convertir le rendement d'extrait BeerXML (`YIELD`, %) vers/depuis `potentialSg`.
+ */
+export const MAX_EXTRACT_POINTS = 46;
+
+/** Rendement d'extrait (%, base saccharose) → potentiel en SG brute (points/kg/L). */
+export function yieldToPotentialSg(yieldPct: number): number {
+  return sgFromPoints((yieldPct / 100) * MAX_EXTRACT_POINTS);
+}
+
+/** Potentiel en SG brute → rendement d'extrait (%). Inverse de {@link yieldToPotentialSg}. */
+export function potentialSgToYield(potentialSg: number): number {
+  return (points(potentialSg) / MAX_EXTRACT_POINTS) * 100;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SG ↔ Plato ↔ Brix
 // ─────────────────────────────────────────────────────────────────────────────
 
