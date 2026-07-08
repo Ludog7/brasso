@@ -196,8 +196,8 @@ describe("création d'une recette", () => {
 
 describe("shell éditeur", () => {
   it("modifier le nom lève l'indicateur dirty puis PATCH à l'enregistrement", async () => {
-    // Moteur générique (ALT_FERMENTED) → shell commun M2-05 (BEER a son éditeur dédié).
-    const recipe = makeRecipe({ engine: "ALT_FERMENTED", name: "IPA maison" });
+    // Moteur générique (SOFT_DRINK) → shell commun M2-05 (BEER/ALT ont leur éditeur dédié).
+    const recipe = makeRecipe({ engine: "SOFT_DRINK", name: "Limonade maison" });
     recipes.push(recipe);
     installFetch();
     const user = userEvent.setup();
@@ -207,13 +207,13 @@ describe("shell éditeur", () => {
     expect(screen.queryByText(/modifications non enregistrées/i)).not.toBeInTheDocument();
 
     await user.clear(nameInput);
-    await user.type(nameInput, "IPA maison v2");
+    await user.type(nameInput, "Limonade maison v2");
     expect(screen.getByText(/modifications non enregistrées/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /enregistrer/i }));
 
     expect(await screen.findByText(/modifications enregistrées/i)).toBeInTheDocument();
     const patch = calls.find((c) => c.method === "PATCH");
-    expect(patch?.body).toMatchObject({ name: "IPA maison v2" });
+    expect(patch?.body).toMatchObject({ name: "Limonade maison v2" });
   });
 });
