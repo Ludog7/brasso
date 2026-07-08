@@ -6,6 +6,7 @@ import { useBootstrapSession } from "@/hooks/useAuth";
 import { HomePage } from "@/routes/HomePage";
 import { LoginPage } from "@/routes/LoginPage";
 import { NewRecipePage } from "@/routes/recipes/NewRecipePage";
+import { RecipeDetailPage } from "@/routes/recipes/RecipeDetailPage";
 import { RecipeEditorPage } from "@/routes/recipes/RecipeEditorPage";
 import { RecipesListPage } from "@/routes/recipes/RecipesListPage";
 import { RequireAuth } from "@/routes/RequireAuth";
@@ -49,6 +50,7 @@ export function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/recipes" element={<RecipesListPage />} />
         <Route path="/recipes/new" element={<NewRecipePage />} />
+        <Route path="/recipes/:id" element={<RecipeDetailPage />} />
         <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

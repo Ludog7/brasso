@@ -151,8 +151,8 @@ export function SoftEditor({ recipe }: SoftEditorProps) {
             role="status"
             className="mb-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
           >
-            Cette recette n'est plus un brouillon : elle est en lecture seule. La création d'une
-            nouvelle version arrivera avec le parcours versions (M2-09).
+            Cette recette n'est plus un brouillon : elle est en lecture seule. Gérez les versions et
+            la publication depuis la page de la recette.
           </p>
         ) : null}
 
@@ -196,7 +196,8 @@ export function SoftEditor({ recipe }: SoftEditorProps) {
                   ))}
                 </ul>
                 <p className="mt-1 text-xs text-amber-200/80">
-                  Le blocage effectif est appliqué au serveur (parcours publication, M2-09).
+                  Complète ces points, puis publie depuis la page de la recette (contrôle appliqué
+                  au serveur).
                 </p>
               </div>
             ) : null}

@@ -15,6 +15,7 @@ export const recipeKeys = {
   all: ["recipes"] as const,
   list: (filters: RecipeListFilters) => ["recipes", "list", filters] as const,
   detail: (id: string) => ["recipes", "detail", id] as const,
+  family: (familyId: string) => ["recipes", "family", familyId] as const,
 };
 
 /** Liste des recettes, filtrable par moteur et statut (filtrage côté API). */
@@ -22,6 +23,15 @@ export function useRecipes(filters: RecipeListFilters = {}) {
   return useQuery({
     queryKey: recipeKeys.list(filters),
     queryFn: () => recipesApi.list(filters),
+  });
+}
+
+/** Versions d'une même famille (`familyId`) — alimente le sélecteur de versions (M2-09). */
+export function useRecipeFamily(familyId: string | undefined) {
+  return useQuery({
+    queryKey: recipeKeys.family(familyId ?? ""),
+    queryFn: () => recipesApi.list({ familyId }),
+    enabled: Boolean(familyId),
   });
 }
 
@@ -78,6 +88,51 @@ export function useSaveRecipeDraft(id: string) {
       await recipesApi.replaceIngredients(id, payload.ingredients);
       return recipesApi.replaceSteps(id, payload.steps);
     },
+    onSuccess: (recipe) => {
+      qc.setQueryData(recipeKeys.detail(id), recipe);
+      void qc.invalidateQueries({ queryKey: recipeKeys.all });
+    },
+  });
+}
+
+// ── Cycle de vie (M2-09, ADR-07) ─────────────────────────────────────────────
+
+/**
+ * Publie un brouillon (`DRAFT → PUBLISHED`). En cas de 422, l'erreur porte les
+ * manquements (cf. `publicationErrors`) ; le cache n'est pas touché. En succès,
+ * met à jour le détail et invalide les listes / la famille.
+ */
+export function usePublishRecipe(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => recipesApi.publish(id),
+    onSuccess: (recipe) => {
+      qc.setQueryData(recipeKeys.detail(id), recipe);
+      void qc.invalidateQueries({ queryKey: recipeKeys.all });
+    },
+  });
+}
+
+/**
+ * Crée une nouvelle version (n+1) depuis une recette publiée. Renvoie le brouillon
+ * créé (nouvel `id`, même `familyId`) : l'appelant redirige vers son éditeur.
+ */
+export function useNewVersionRecipe(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => recipesApi.newVersion(id),
+    onSuccess: (recipe) => {
+      qc.setQueryData(recipeKeys.detail(recipe.id), recipe);
+      void qc.invalidateQueries({ queryKey: recipeKeys.all });
+    },
+  });
+}
+
+/** Archive une recette publiée (`PUBLISHED → ARCHIVED`). */
+export function useArchiveRecipe(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => recipesApi.archive(id),
     onSuccess: (recipe) => {
       qc.setQueryData(recipeKeys.detail(id), recipe);
       void qc.invalidateQueries({ queryKey: recipeKeys.all });
