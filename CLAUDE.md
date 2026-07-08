@@ -36,3 +36,4 @@ Node 22 LTS · pnpm workspaces + turborepo · Fastify 5 + Zod · Prisma 6 + Post
 - Spec fonctionnelle métier : `docs/SPEC-FONCTIONNELLE.md`
 - Corps des tickets : `docs/issues/M*/`
 - Amorçage GitHub (labels/milestones/issues) : `scripts/bootstrap-issues.sh`
+- Patterns d'implémentation réutilisables : `docs/patterns/`. **Avant tout ticket d'éditeur de recette par moteur (BEER/ALT/SOFT), lis `docs/patterns/editeur-moteur-recette.md`** (squelette, contrat `mapToEngine`, persistance par moteur, ADR-11, gabarit de test) — évite de reverse-engineer l'éditeur précédent.
