@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { AltEditor } from "@/features/recipes/alt/AltEditor";
 import { BeerEditor } from "@/features/recipes/beer/BeerEditor";
 import { GenericEngineEditor } from "@/features/recipes/GenericEngineEditor";
 import { useRecipe } from "@/features/recipes/hooks";
@@ -8,8 +9,8 @@ import { Button } from "@/ui/button";
 
 /**
  * Shell éditeur `/recipes/:id/edit` : charge la recette puis délègue le contenu
- * au moteur — BEER (M2-06) a son éditeur dédié ; ALT_FERMENTED / SOFT_DRINK
- * utilisent le shell commun M2-05 en attendant leurs éditeurs (M2-07/08).
+ * au moteur — BEER (M2-06) et ALT_FERMENTED (M2-07) ont leur éditeur dédié ;
+ * SOFT_DRINK utilise le shell commun M2-05 en attendant son éditeur (M2-08).
  */
 export function RecipeEditorPage() {
   const { id = "" } = useParams();
@@ -40,6 +41,9 @@ export function RecipeEditorPage() {
 
   if (recipe.data.engine === "BEER") {
     return <BeerEditor recipe={recipe.data} />;
+  }
+  if (recipe.data.engine === "ALT_FERMENTED") {
+    return <AltEditor recipe={recipe.data} />;
   }
   return <GenericEngineEditor recipe={recipe.data} />;
 }
