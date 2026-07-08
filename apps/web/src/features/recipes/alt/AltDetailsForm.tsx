@@ -6,7 +6,7 @@ import { Label } from "@/ui/label";
 import { Select } from "@/ui/select";
 import { Textarea } from "@/ui/textarea";
 
-import { DRINK_TYPES } from "../labels";
+import { DRINK_TYPES, STABILIZATION_LABELS } from "../labels";
 import type { AltFormState } from "./mapToEngine";
 
 /** Champs scalaires de détail pilotés par ce formulaire. */
@@ -32,16 +32,6 @@ const BASE_TYPE_OPTIONS: readonly { value: string; label: string }[] = [
   })),
   { value: "AUTRE", label: "Autre" },
 ];
-
-/** Libellés FR des méthodes de stabilisation (enum core `StabilizationMethod`). */
-const STABILIZATION_LABELS: Record<StabilizationMethod, string> = {
-  PASTEURIZATION: "Pasteurisation",
-  THERMAL: "Traitement thermique",
-  COLD_CHAIN: "Chaîne du froid",
-  FILTRATION_ACIDIFICATION: "Filtration + acidification",
-  CHEMICAL: "Stabilisation chimique",
-  OTHER: "Autre méthode",
-};
 
 interface AltDetailsFormProps {
   fields: AltDetailsFields;

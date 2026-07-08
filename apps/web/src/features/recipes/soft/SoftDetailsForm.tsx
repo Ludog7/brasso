@@ -11,6 +11,7 @@ import { Label } from "@/ui/label";
 import { Select } from "@/ui/select";
 import { Textarea } from "@/ui/textarea";
 
+import { STABILIZATION_LABELS, STORAGE_MODE_LABELS } from "../labels";
 import type { SoftFormState } from "./mapToEngine";
 
 /** Champs scalaires de détail pilotés par ce formulaire. */
@@ -24,22 +25,6 @@ export type SoftDetailsFields = Pick<
   | "stabilizationMethod"
   | "batchVolumeL"
 >;
-
-/** Libellés FR des méthodes de stabilisation (enum core `StabilizationMethod`). */
-const STABILIZATION_LABELS: Record<StabilizationMethod, string> = {
-  PASTEURIZATION: "Pasteurisation",
-  THERMAL: "Traitement thermique",
-  COLD_CHAIN: "Chaîne du froid",
-  FILTRATION_ACIDIFICATION: "Filtration + acidification",
-  CHEMICAL: "Stabilisation chimique",
-  OTHER: "Autre méthode",
-};
-
-/** Libellés FR des modes de conservation (enum core `StorageMode`). */
-const STORAGE_LABELS: Record<StorageMode, string> = {
-  cold: "Chaîne du froid",
-  ambient: "Température ambiante",
-};
 
 interface SoftDetailsFormProps {
   fields: SoftDetailsFields;
@@ -134,7 +119,7 @@ export function SoftDetailsForm({ fields, disabled, onChange }: SoftDetailsFormP
               <option value="">Non renseigné</option>
               {storageModeSchema.options.map((mode) => (
                 <option key={mode} value={mode}>
-                  {STORAGE_LABELS[mode]}
+                  {STORAGE_MODE_LABELS[mode]}
                 </option>
               ))}
             </Select>

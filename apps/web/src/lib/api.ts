@@ -25,19 +25,40 @@ export interface User {
 }
 
 interface ApiErrorBody {
-  error?: { code?: string; message?: string };
+  error?: { code?: string; message?: string; details?: unknown };
 }
 
-/** Erreur HTTP portant le code métier de l'enveloppe `{ error: { code } }`. */
+/** Erreur HTTP portant le code métier de l'enveloppe `{ error: { code, details? } }`. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Charge structurée des erreurs < 500 (ex. manquements de publication, 422). */
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/**
+ * Extrait les manquements d'un refus de publication (422 `NOT_PUBLISHABLE`, ADR-06).
+ * Renvoie la liste des messages (déjà rédigés ADR-11) si l'erreur est bien un refus
+ * de publication ; `null` pour toute autre erreur (à traiter génériquement).
+ */
+export function publicationErrors(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || error.code !== "NOT_PUBLISHABLE") {
+    return null;
+  }
+  const details = error.details;
+  if (details && typeof details === "object" && "errors" in details) {
+    const errors = (details as { errors: unknown }).errors;
+    if (Array.isArray(errors) && errors.every((e) => typeof e === "string")) {
+      return errors as string[];
+    }
+  }
+  return [];
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -57,7 +78,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const error = (body as ApiErrorBody | null)?.error;
-    throw new ApiError(res.status, error?.code ?? "ERROR", error?.message ?? res.statusText);
+    throw new ApiError(
+      res.status,
+      error?.code ?? "ERROR",
+      error?.message ?? res.statusText,
+      error?.details,
+    );
   }
   return body as T;
 }
@@ -177,6 +203,8 @@ export interface RecipeUpdateInput {
 export interface RecipeListFilters {
   engine?: RecipeEngine;
   status?: RecipeStatus;
+  /** Toutes les versions d'une même famille (`familyId`) — parcours versions (M2-09). */
+  familyId?: string;
 }
 
 export const recipesApi = {
@@ -184,6 +212,7 @@ export const recipesApi = {
     const qs = new URLSearchParams();
     if (filters.engine) qs.set("engine", filters.engine);
     if (filters.status) qs.set("status", filters.status);
+    if (filters.familyId) qs.set("familyId", filters.familyId);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return request<{ recipes: RecipeSummary[] }>(`/api/recipes${suffix}`).then((r) => r.recipes);
   },
@@ -214,6 +243,26 @@ export const recipesApi = {
       method: "PUT",
       body: JSON.stringify({ steps }),
     }).then((r) => r.recipe),
+
+  // ── Cycle de vie (M2-03/ADR-07). Transitions serveur : DRAFT → PUBLISHED → ARCHIVED. ──
+
+  /** Publie un brouillon. Rejette en 422 `NOT_PUBLISHABLE` (cf. `publicationErrors`). */
+  publish: (id: string): Promise<RecipeDetail> =>
+    request<{ recipe: RecipeDetail }>(`/api/recipes/${id}/publish`, { method: "POST" }).then(
+      (r) => r.recipe,
+    ),
+
+  /** Crée un brouillon version n+1 depuis une recette publiée (renvoie le nouveau DRAFT). */
+  newVersion: (id: string): Promise<RecipeDetail> =>
+    request<{ recipe: RecipeDetail }>(`/api/recipes/${id}/new-version`, { method: "POST" }).then(
+      (r) => r.recipe,
+    ),
+
+  /** Archive une recette publiée (PUBLISHED → ARCHIVED). */
+  archive: (id: string): Promise<RecipeDetail> =>
+    request<{ recipe: RecipeDetail }>(`/api/recipes/${id}/archive`, { method: "POST" }).then(
+      (r) => r.recipe,
+    ),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

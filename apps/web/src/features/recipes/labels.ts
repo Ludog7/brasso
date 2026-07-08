@@ -1,3 +1,11 @@
+import type {
+  IngredientCategory,
+  ProcessStepType,
+  StabilizationMethod,
+  StockUnit,
+  StorageMode,
+} from "@brasso/core";
+
 import type { RecipeCreateInput, RecipeEngine, RecipeStatus } from "@/lib/api";
 
 /**
@@ -26,6 +34,53 @@ export const STATUS_TONE: Record<RecipeStatus, "neutral" | "success" | "muted"> 
   DRAFT: "neutral",
   PUBLISHED: "success",
   ARCHIVED: "muted",
+};
+
+/** Libellés FR des méthodes de stabilisation (enum core `StabilizationMethod`). */
+export const STABILIZATION_LABELS: Record<StabilizationMethod, string> = {
+  PASTEURIZATION: "Pasteurisation",
+  THERMAL: "Traitement thermique",
+  COLD_CHAIN: "Chaîne du froid",
+  FILTRATION_ACIDIFICATION: "Filtration + acidification",
+  CHEMICAL: "Stabilisation chimique",
+  OTHER: "Autre méthode",
+};
+
+/** Libellés FR des modes de conservation (enum core `StorageMode`). */
+export const STORAGE_MODE_LABELS: Record<StorageMode, string> = {
+  cold: "Chaîne du froid",
+  ambient: "Température ambiante",
+};
+
+/** Libellés FR des catégories d'ingrédient (enum core `IngredientCategory`). */
+export const INGREDIENT_CATEGORY_LABELS: Record<IngredientCategory, string> = {
+  MALT: "Malt",
+  SUGAR: "Sucre",
+  HOP: "Houblon",
+  YEAST: "Levure",
+  ADJUNCT: "Ingrédient additionnel",
+};
+
+/** Libellés FR des types d'étape de process (enum core `ProcessStepType`). */
+export const STEP_TYPE_LABELS: Record<ProcessStepType, string> = {
+  MASH: "Empâtage",
+  MASH_STEP: "Palier d'empâtage",
+  SPARGE: "Rinçage",
+  BOIL: "Ébullition",
+  WHIRLPOOL: "Whirlpool",
+  COOL: "Refroidissement",
+  FERMENT: "Fermentation",
+  STABILIZE: "Stabilisation",
+  CONDITION: "Maturation",
+  PACKAGE: "Conditionnement",
+  OTHER: "Autre",
+};
+
+/** Libellés FR courts des unités de stock (enum core `StockUnit`). */
+export const UNIT_LABELS: Record<StockUnit, string> = {
+  GRAM: "g",
+  LITER: "L",
+  UNIT: "u",
 };
 
 /** Type de boisson proposé à la création (concept UI). */

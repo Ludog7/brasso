@@ -119,7 +119,7 @@ export function RecipesListPage() {
               {recipes.data.map((recipe) => (
                 <li key={recipe.id}>
                   <Link
-                    to={`/recipes/${recipe.id}/edit`}
+                    to={`/recipes/${recipe.id}`}
                     className="block rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     <Card className="h-full hover:border-primary/60">
