@@ -42,8 +42,9 @@ function volumePatch(engine: RecipeEngine, batchVolumeL: number): RecipeUpdateIn
 const numberToField = (value: number | null): string => (value == null ? "" : String(value));
 
 /**
- * Shell d'édition commun (M2-05) pour les moteurs sans éditeur dédié (SOFT_DRINK —
- * à venir M2-08) : nom, description, volume cible + sauvegarde PATCH.
+ * Shell d'édition commun (M2-05) : nom, description, volume cible + sauvegarde PATCH.
+ * BEER/ALT_FERMENTED/SOFT_DRINK ont tous leur éditeur dédié (M2-06/07/08) ; ce shell
+ * reste le **repli** pour tout futur moteur introduit sans éditeur spécifique.
  */
 export function GenericEngineEditor({ recipe: data }: { recipe: RecipeDetail }) {
   const navigate = useNavigate();
