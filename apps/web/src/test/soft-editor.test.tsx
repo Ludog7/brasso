@@ -183,9 +183,7 @@ describe("éditeur SOFT — indicateurs sécurité (ADR-11)", () => {
 
     await user.selectOptions(screen.getByLabelText(/mode de conservation/i), "cold");
 
-    await waitFor(() =>
-      expect(screen.queryByTestId("soft-stabilization")).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByTestId("soft-stabilization")).not.toBeInTheDocument());
     // Le bandeau « stabilisation requise » disparaît lui aussi.
     expect(screen.queryByText(SOFT_STABILIZATION_REQUIRED)).not.toBeInTheDocument();
   });
