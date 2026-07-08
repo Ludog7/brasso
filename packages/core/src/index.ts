@@ -44,3 +44,6 @@ export * from "./stateMachine/index.js";
 
 // Données de référence statiques — styles BJCP (M2-04, seed M1-02 côté DB).
 export * from "./reference/index.js";
+
+// Import/export BeerXML 1.0 — moteur BEER uniquement (M2-10, spec « scope limité »).
+export * from "./beerxml/index.js";
