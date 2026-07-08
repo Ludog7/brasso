@@ -5,6 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
+import { GenericEngineEditor } from "@/features/recipes/GenericEngineEditor";
+import { useRecipe } from "@/features/recipes/hooks";
 import { createInputForDrinkType, engineForDrinkType } from "@/features/recipes/labels";
 import type { RecipeDetail, RecipeEngine } from "@/lib/api";
 import { useSession } from "@/stores/session";
@@ -194,14 +196,32 @@ describe("création d'une recette", () => {
   });
 });
 
-describe("shell éditeur", () => {
+/**
+ * Harness du shell générique : charge la recette via `useRecipe` (comme la page
+ * `RecipeEditorPage`) puis rend `GenericEngineEditor`. Reproduit la resynchro de la
+ * prop après sauvegarde (`setQueryData`), nécessaire pour voir « enregistrées ».
+ */
+function GenericEditorHarness({ id }: { id: string }) {
+  const recipe = useRecipe(id);
+  return recipe.data ? <GenericEngineEditor recipe={recipe.data} /> : null;
+}
+
+describe("shell éditeur générique (repli moteur sans éditeur dédié)", () => {
   it("modifier le nom lève l'indicateur dirty puis PATCH à l'enregistrement", async () => {
-    // Moteur générique (SOFT_DRINK) → shell commun M2-05 (BEER/ALT ont leur éditeur dédié).
+    // BEER/ALT/SOFT ont désormais leur éditeur dédié : le shell générique n'est plus
+    // atteint par le routage. On le teste donc en isolation (repli sanctuarisé).
     const recipe = makeRecipe({ engine: "SOFT_DRINK", name: "Limonade maison" });
     recipes.push(recipe);
     installFetch();
     const user = userEvent.setup();
-    renderApp([`/recipes/${recipe.id}/edit`]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GenericEditorHarness id={recipe.id} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
 
     const nameInput = await screen.findByLabelText("Nom");
     expect(screen.queryByText(/modifications non enregistrées/i)).not.toBeInTheDocument();
