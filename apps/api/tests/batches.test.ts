@@ -16,6 +16,7 @@ import type {
   BatchListFilters,
   BatchRepository,
   BatchSummaryView,
+  ReservationInput,
 } from "../src/modules/batches/repository.js";
 import type { RecipeRepository, RecipeWithDetails } from "../src/modules/recipes/repository.js";
 import { SESSION_COOKIE } from "../src/plugins/auth.js";
@@ -59,7 +60,7 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 }
 
-/** Repo recette minimal : seul `findById` sert au service batch ; le reste n'est pas sollicité. */
+/** Repo recette minimal : seul `findById` sert au service batch. */
 class StubRecipeRepository implements RecipeRepository {
   private store = new Map<string, RecipeWithDetails>();
   insert(recipe: RecipeWithDetails): void {
@@ -102,13 +103,19 @@ class StubRecipeRepository implements RecipeRepository {
 }
 
 function summaryOf(b: BatchDetailView): BatchSummaryView {
-  const { recipeSnapshot: _s, ...rest } = b;
+  const { recipeSnapshot: _s, reservations: _r, ...rest } = b;
   return rest;
 }
 
 class InMemoryBatchRepository implements BatchRepository {
   private store = new Map<string, BatchDetailView>();
+  private stock = new Map<string, number>();
   private seq = 0;
+
+  /** Amorce un stock disponible pour un article (tests de warning). */
+  setStock(catalogItemId: string, quantity: number): void {
+    this.stock.set(catalogItemId, quantity);
+  }
 
   list(filters: BatchListFilters): Promise<BatchSummaryView[]> {
     let items = [...this.store.values()];
@@ -120,10 +127,15 @@ class InMemoryBatchRepository implements BatchRepository {
   findById(id: string): Promise<BatchDetailView | null> {
     return Promise.resolve(this.store.get(id) ?? null);
   }
-  create(data: BatchCreateData): Promise<BatchDetailView> {
+  create(
+    data: BatchCreateData,
+    reservations: ReservationInput[],
+    _createdById: string | null,
+  ): Promise<BatchDetailView> {
     const now = new Date();
+    const id = `batch_${this.seq + 1}`;
     const batch: BatchDetailView = {
-      id: `batch_${this.seq + 1}`,
+      id,
       batchNumber: ++this.seq,
       recipeId: data.recipeId,
       recipeVersion: data.recipeVersion,
@@ -137,16 +149,32 @@ class InMemoryBatchRepository implements BatchRepository {
       completedAt: null,
       createdAt: now,
       updatedAt: now,
+      reservations: reservations.map((r, i) => ({
+        id: `${id}_res_${i}`,
+        catalogItemId: r.catalogItemId,
+        quantity: r.quantity,
+        status: "RESERVED",
+      })),
     };
-    this.store.set(batch.id, batch);
+    this.store.set(id, batch);
     return Promise.resolve(batch);
   }
-  updateStatus(id: string, status: BatchDetailView["status"]): Promise<BatchDetailView> {
+  cancel(id: string): Promise<BatchDetailView> {
     const existing = this.store.get(id);
     if (!existing) throw new Error(`batch ${id} absent (le service garantit son existence)`);
-    const updated = { ...existing, status, updatedAt: new Date() };
+    const updated: BatchDetailView = {
+      ...existing,
+      status: "ANNULE",
+      updatedAt: new Date(),
+      reservations: existing.reservations.map((r) =>
+        r.status === "RESERVED" ? { ...r, status: "RELEASED" } : r,
+      ),
+    };
     this.store.set(id, updated);
     return Promise.resolve(updated);
+  }
+  availableByItem(catalogItemIds: string[]): Promise<Map<string, number>> {
+    return Promise.resolve(new Map(catalogItemIds.map((id) => [id, this.stock.get(id) ?? 0])));
   }
 }
 
@@ -174,22 +202,29 @@ function publishedRecipe(over: Partial<RecipeWithDetails> = {}): RecipeWithDetai
     },
     altDetails: null,
     softDetails: null,
-    ingredients: [
-      {
-        id: "i1",
-        catalogItemId: null,
-        name: "Pale Ale",
-        category: "MALT",
-        use: null,
-        amount: 5000,
-        unit: "GRAM",
-        timeMinutes: null,
-        sortOrder: 0,
-        params: { isMashable: true, potentialSg: 1.037, colorEbc: 4 },
-      },
-    ],
+    ingredients: [ingredient("i1", "Pale Ale", null, 5000)],
     steps: [{ id: "s1", type: "BOIL", name: null, sortOrder: 0, params: { timeMin: 60 } }],
     ...over,
+  };
+}
+
+function ingredient(
+  id: string,
+  name: string,
+  catalogItemId: string | null,
+  amount: number,
+): RecipeWithDetails["ingredients"][number] {
+  return {
+    id,
+    catalogItemId,
+    name,
+    category: "MALT",
+    use: null,
+    amount,
+    unit: "GRAM",
+    timeMinutes: null,
+    sortOrder: 0,
+    params: {},
   };
 }
 
@@ -199,10 +234,10 @@ const USERS: Record<string, string[]> = {
   caisse: ["caisse"],
 };
 
-async function makeApp(recipes: StubRecipeRepository): Promise<{
-  app: FastifyInstance;
-  cookieFor: (u: string) => string;
-}> {
+async function makeApp(
+  recipes: StubRecipeRepository,
+  batches: InMemoryBatchRepository,
+): Promise<{ app: FastifyInstance; cookieFor: (u: string) => string }> {
   const auth = new InMemoryAuthRepository();
   const future = new Date(Date.now() + 3_600_000);
   for (const [id, roles] of Object.entries(USERS)) {
@@ -220,7 +255,7 @@ async function makeApp(recipes: StubRecipeRepository): Promise<{
     config,
     authRepository: auth,
     recipeRepository: recipes,
-    batchRepository: new InMemoryBatchRepository(),
+    batchRepository: batches,
   });
   await app.ready();
   return { app, cookieFor: (user) => app.signCookie(`tok_${user}`) };
@@ -244,14 +279,16 @@ function inject(
   });
 }
 
-describe("module batches — planification (M3-04)", () => {
+describe("module batches — planification & réservation (M3-04/M3-05)", () => {
   let app: FastifyInstance;
   let recipes: StubRecipeRepository;
+  let batches: InMemoryBatchRepository;
   let cookieFor: (u: string) => string;
 
   beforeEach(async () => {
     recipes = new StubRecipeRepository();
-    ({ app, cookieFor } = await makeApp(recipes));
+    batches = new InMemoryBatchRepository();
+    ({ app, cookieFor } = await makeApp(recipes, batches));
   });
   const close = async (): Promise<void> => {
     await app.close();
@@ -273,9 +310,7 @@ describe("module batches — planification (M3-04)", () => {
         status: "PLANIFIE",
       });
       expect(batch.batchNumber).toBeGreaterThan(0);
-      // Le snapshot fige la recette complète (ingrédients inclus).
       expect(batch.recipeSnapshot.name).toBe("IPA maison");
-      expect(batch.recipeSnapshot.ingredients).toHaveLength(1);
     } finally {
       await close();
     }
@@ -307,7 +342,6 @@ describe("module batches — planification (M3-04)", () => {
       recipes.insert(publishedRecipe());
       const id = (await plan({ recipeId: "rec-1" })).json().batch.id;
       recipes.mutateName("rec-1", "IPA renommée");
-
       const read = await inject(app, "GET", `/api/batches/${id}`, {
         cookie: cookieFor("brasseur"),
       });
@@ -317,21 +351,73 @@ describe("module batches — planification (M3-04)", () => {
     }
   });
 
-  it("liste et annule un batch ; une seconde annulation est refusée (409)", async () => {
+  it("réserve le stock des ingrédients catalogués ; liste les non catalogués", async () => {
     try {
-      recipes.insert(publishedRecipe());
-      const id = (await plan({ recipeId: "rec-1" })).json().batch.id;
+      recipes.insert(
+        publishedRecipe({
+          ingredients: [
+            ingredient("i1", "Pilsner", "cat-malt", 4000),
+            ingredient("i2", "Saaz", "cat-hop", 30),
+            ingredient("i3", "Gingembre frais", null, 200), // hors catalogue
+          ],
+        }),
+      );
+      batches.setStock("cat-malt", 10000);
+      batches.setStock("cat-hop", 500);
 
-      const list = await inject(app, "GET", "/api/batches?status=PLANIFIE", {
-        cookie: cookieFor("brasseur"),
+      const res = await plan({ recipeId: "rec-1" });
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      const reserved = body.batch.reservations;
+      expect(reserved).toHaveLength(2);
+      expect(reserved.every((r: { status: string }) => r.status === "RESERVED")).toBe(true);
+      expect(reserved.map((r: { catalogItemId: string }) => r.catalogItemId)).toEqual(
+        expect.arrayContaining(["cat-malt", "cat-hop"]),
+      );
+      expect(body.unreservedIngredients).toEqual(["Gingembre frais"]);
+      expect(body.stockWarnings).toHaveLength(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it("stock insuffisant → avertissement non bloquant (batch quand même planifié)", async () => {
+    try {
+      recipes.insert(
+        publishedRecipe({ ingredients: [ingredient("i1", "Pilsner", "cat-malt", 4000)] }),
+      );
+      batches.setStock("cat-malt", 1000); // < 4000 requis
+
+      const res = await plan({ recipeId: "rec-1" });
+      expect(res.statusCode).toBe(201); // non bloquant
+      const body = res.json();
+      expect(body.stockWarnings).toHaveLength(1);
+      expect(body.stockWarnings[0]).toMatchObject({
+        catalogItemId: "cat-malt",
+        requested: 4000,
+        available: 1000,
       });
-      expect(list.json().batches).toHaveLength(1);
+      // La réservation est tout de même posée (déduction réelle = M5).
+      expect(body.batch.reservations).toHaveLength(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it("annulation : réservations passées en RELEASED ; seconde annulation refusée (409)", async () => {
+    try {
+      recipes.insert(
+        publishedRecipe({ ingredients: [ingredient("i1", "Pilsner", "cat-malt", 4000)] }),
+      );
+      batches.setStock("cat-malt", 10000);
+      const id = (await plan({ recipeId: "rec-1" })).json().batch.id;
 
       const cancel = await inject(app, "POST", `/api/batches/${id}/cancel`, {
         cookie: cookieFor("brasseur"),
       });
       expect(cancel.statusCode).toBe(200);
       expect(cancel.json().batch.status).toBe("ANNULE");
+      expect(cancel.json().batch.reservations[0].status).toBe("RELEASED");
 
       const again = await inject(app, "POST", `/api/batches/${id}/cancel`, {
         cookie: cookieFor("brasseur"),

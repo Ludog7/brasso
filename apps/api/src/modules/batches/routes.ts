@@ -40,8 +40,8 @@ export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (ap
 
   app.post("/batches", { config: app.rbac("recettes", "create") }, async (request, reply) => {
     const body = batchCreateBody.parse(request.body);
-    const batch = await service.plan(body);
-    return reply.code(201).send({ batch });
+    const result = await service.plan(body, request.user?.id ?? null);
+    return reply.code(201).send(result);
   });
 
   app.post("/batches/:id/cancel", { config: app.rbac("recettes", "update") }, async (request) => {
