@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useRecipes } from "@/features/recipes/hooks";
+import { ImportRecipeButton } from "@/features/recipes/ImportRecipeButton";
 import { ENGINE_LABELS, STATUS_LABELS, STATUS_TONE } from "@/features/recipes/labels";
 import { useLogout } from "@/hooks/useAuth";
 import type { RecipeEngine, RecipeStatus } from "@/lib/api";
@@ -47,12 +48,15 @@ export function RecipesListPage() {
       <main className="mx-auto max-w-5xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold tracking-tight">Recettes</h1>
-          <Button asChild size="lg">
-            <Link to="/recipes/new">
-              <Plus className="size-5" aria-hidden="true" />
-              Nouvelle recette
-            </Link>
-          </Button>
+          <div className="flex flex-wrap items-start gap-3">
+            <ImportRecipeButton />
+            <Button asChild size="lg">
+              <Link to="/recipes/new">
+                <Plus className="size-5" aria-hidden="true" />
+                Nouvelle recette
+              </Link>
+            </Button>
+          </div>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-4">

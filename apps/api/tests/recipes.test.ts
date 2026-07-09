@@ -950,3 +950,236 @@ describe("module recipes — CRUD des brouillons (M2-01)", () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Import / export (M2-12)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** BeerXML minimal valide (moteur BEER) pour les imports. */
+const BEERXML_IMPORT = `<?xml version="1.0" encoding="UTF-8"?>
+<RECIPES><RECIPE>
+<NAME>APA importee</NAME><VERSION>1</VERSION><TYPE>All Grain</TYPE>
+<BATCH_SIZE>20.0</BATCH_SIZE><BOIL_SIZE>24.0</BOIL_SIZE><BOIL_TIME>60</BOIL_TIME><EFFICIENCY>72.0</EFFICIENCY>
+<FERMENTABLES><FERMENTABLE><NAME>Pale Malt</NAME><VERSION>1</VERSION><TYPE>Grain</TYPE><AMOUNT>5.0</AMOUNT><YIELD>80.0</YIELD><COLOR>3.0</COLOR></FERMENTABLE></FERMENTABLES>
+<HOPS><HOP><NAME>Cascade</NAME><VERSION>1</VERSION><ALPHA>6.0</ALPHA><AMOUNT>0.03</AMOUNT><USE>Boil</USE><TIME>60</TIME></HOP></HOPS>
+<YEASTS><YEAST><NAME>US-05</NAME><VERSION>1</VERSION><ATTENUATION>78.0</ATTENUATION></YEAST></YEASTS>
+</RECIPE></RECIPES>`;
+
+describe("module recipes — import/export (M2-12)", () => {
+  let app: FastifyInstance;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    ({ app, cookieFor } = await makeApp());
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const createRecipe = async (payload: unknown): Promise<string> => {
+    const res = await inject(app, "POST", "/api/recipes", {
+      cookie: cookieFor("brasseur"),
+      payload,
+    });
+    return res.json().recipe.id;
+  };
+
+  const exportReq = (id: string, user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "GET", `/api/recipes/${id}/export`, { cookie: cookieFor(user) });
+
+  const importXml = (
+    xml: string,
+    user: string | null = "brasseur",
+  ): ReturnType<FastifyInstance["inject"]> =>
+    app.inject({
+      method: "POST",
+      url: "/api/recipes/import",
+      headers: { "content-type": "application/xml" },
+      payload: xml,
+      ...(user ? { cookies: { [SESSION_COOKIE]: cookieFor(user) } } : {}),
+    });
+
+  const importJson = (
+    body: unknown,
+    user: string | null = "brasseur",
+  ): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/recipes/import", {
+      ...(user ? { cookie: cookieFor(user) } : {}),
+      payload: body,
+    });
+
+  it("exporte chaque moteur avec le bon content-type et un nom de fichier", async () => {
+    try {
+      const cases = [
+        { body: BEER_BODY, ext: ".xml", type: "application/xml" },
+        { body: ALT_BODY, ext: ".json", type: "application/json" },
+        { body: SOFT_BODY, ext: ".json", type: "application/json" },
+      ];
+      for (const { body, ext, type } of cases) {
+        const id = await createRecipe(body);
+        const res = await exportReq(id);
+        expect(res.statusCode, body.engine).toBe(200);
+        expect(res.headers["content-type"]).toContain(type);
+        expect(res.headers["content-disposition"]).toContain(ext);
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it("exporte une BEER en BeerXML et une ALT en brasso-recipe v1", async () => {
+    try {
+      const beerId = await createRecipe(BEER_BODY);
+      const beer = await exportReq(beerId);
+      expect(beer.body.trimStart()).toMatch(/^<\?xml/);
+      expect(beer.body).toContain("<RECIPE>");
+
+      const altId = await createRecipe(ALT_BODY);
+      const alt = await exportReq(altId);
+      const envelope = JSON.parse(alt.body);
+      expect(envelope).toMatchObject({
+        format: "brasso-recipe",
+        formatVersion: 1,
+        engine: "ALT_FERMENTED",
+      });
+      expect(envelope.recipe.altDetails.baseType).toBe("gingembre");
+    } finally {
+      await close();
+    }
+  });
+
+  it("importe un BeerXML → nouveau DRAFT BEER avec ses ingrédients", async () => {
+    try {
+      const res = await importXml(BEERXML_IMPORT);
+      expect(res.statusCode).toBe(201);
+      const { recipe } = res.json();
+      expect(recipe).toMatchObject({ engine: "BEER", status: "DRAFT", version: 1 });
+      const categories = recipe.ingredients.map((i: { category: string }) => i.category);
+      expect(categories).toEqual(expect.arrayContaining(["MALT", "HOP", "YEAST"]));
+    } finally {
+      await close();
+    }
+  });
+
+  it("importe un JSON brasso-recipe (ALT) → nouveau DRAFT, nouvelle famille", async () => {
+    try {
+      const srcId = await createRecipe(ALT_BODY);
+      const exported = JSON.parse((await exportReq(srcId)).body);
+
+      const res = await importJson(exported);
+      expect(res.statusCode).toBe(201);
+      const { recipe } = res.json();
+      expect(recipe).toMatchObject({ engine: "ALT_FERMENTED", status: "DRAFT", version: 1 });
+      expect(recipe.altDetails).toMatchObject({ baseType: "gingembre", targetPh: 3.4 });
+      // Nouvelle famille : import = recette indépendante, pas une version de la source.
+      const src = await inject(app, "GET", `/api/recipes/${srcId}`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(recipe.familyId).not.toBe(src.json().recipe.familyId);
+    } finally {
+      await close();
+    }
+  });
+
+  it("critère fonctionnel : export BEER → réimport → aller-retour idempotent (prévisions préservées)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      await inject(app, "PATCH", `/api/recipes/${id}`, {
+        cookie: cookieFor("brasseur"),
+        payload: { beerDetails: { batchVolumeL: 20, boilTimeMin: 60, efficiency: 0.72 } },
+      });
+      await inject(app, "PUT", `/api/recipes/${id}/ingredients`, {
+        cookie: cookieFor("brasseur"),
+        payload: {
+          ingredients: [
+            {
+              category: "MALT",
+              name: "Pale",
+              amount: 5000,
+              params: { isMashable: true, potentialSg: 1.037, colorEbc: 4 },
+            },
+            {
+              category: "HOP",
+              name: "Cascade",
+              amount: 30,
+              use: "BOIL",
+              timeMinutes: 60,
+              params: { alphaFraction: 0.06 },
+            },
+            { category: "YEAST", name: "US-05", amount: 11, params: { attenuationPct: 78 } },
+          ],
+        },
+      });
+      const published = await inject(app, "POST", `/api/recipes/${id}/publish`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(published.statusCode).toBe(200);
+
+      const xml1 = (await exportReq(id)).body;
+      const imported = await importXml(xml1);
+      expect(imported.statusCode).toBe(201);
+      const reimported = imported.json().recipe;
+      expect(reimported.id).not.toBe(id);
+      expect(reimported).toMatchObject({ engine: "BEER", status: "DRAFT", version: 1 });
+
+      // Ré-exporter le DRAFT réimporté redonne le même BeerXML : tous les intrants
+      // de calcul (potentiel, α, temps, atténuation, volume, rendement) sont conservés.
+      const xml2 = (await exportReq(reimported.id)).body;
+      expect(xml2).toBe(xml1);
+    } finally {
+      await close();
+    }
+  });
+
+  it("fichier BeerXML invalide → 422 avec chemins des champs fautifs", async () => {
+    try {
+      const invalid = BEERXML_IMPORT.replace(/<BATCH_SIZE>[^<]*<\/BATCH_SIZE>/, "");
+      const res = await importXml(invalid);
+      expect(res.statusCode).toBe(422);
+      const { error } = res.json();
+      expect(error.code).toBe("IMPORT_INVALID");
+      expect(error.details.paths).toContain("RECIPE/BATCH_SIZE");
+    } finally {
+      await close();
+    }
+  });
+
+  it("JSON brasso-recipe invalide / moteur BEER / version inconnue → 422", async () => {
+    try {
+      const base = { format: "brasso-recipe", formatVersion: 1 };
+      const payloadInvalid = { ...base, engine: "ALT_FERMENTED", recipe: {} };
+      expect((await importJson(payloadInvalid)).statusCode).toBe(422);
+
+      const payloadBeer = { ...base, engine: "BEER", recipe: {} };
+      const beerRes = await importJson(payloadBeer);
+      expect(beerRes.statusCode).toBe(422);
+      expect(beerRes.json().error.code).toBe("IMPORT_INVALID");
+
+      const payloadVersion = {
+        format: "brasso-recipe",
+        formatVersion: 99,
+        engine: "ALT_FERMENTED",
+        recipe: {},
+      };
+      expect((await importJson(payloadVersion)).statusCode).toBe(422);
+    } finally {
+      await close();
+    }
+  });
+
+  it("RBAC : export lisible par caisse, refusé sans session ; import réservé à (recipes, create)", async () => {
+    try {
+      const id = await createRecipe(BEER_BODY);
+      expect((await exportReq(id, "caisse")).statusCode).toBe(200);
+
+      const anon = await inject(app, "GET", `/api/recipes/${id}/export`);
+      expect(anon.statusCode).toBe(401);
+
+      expect((await importXml(BEERXML_IMPORT, "caisse")).statusCode).toBe(403);
+      expect((await importXml(BEERXML_IMPORT, null)).statusCode).toBe(401);
+      expect((await importXml(BEERXML_IMPORT, "brasseur")).statusCode).toBe(201);
+    } finally {
+      await close();
+    }
+  });
+});

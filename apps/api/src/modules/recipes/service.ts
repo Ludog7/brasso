@@ -7,6 +7,11 @@ import {
   stepAllowedForEngine,
 } from "@brasso/core";
 
+import {
+  exportRecipe as buildRecipeExport,
+  parseImport,
+  type RecipeExport,
+} from "./portability.js";
 import type {
   RecipeCreateData,
   RecipeListFilters,
@@ -212,6 +217,33 @@ export class RecipeService {
       throw new DraftAlreadyExistsError(source.familyId);
     }
     return this.repo.createNextVersion(id);
+  }
+
+  /**
+   * Sérialise une recette pour export (M2-12) : BEER → BeerXML, ALT/SOFT → JSON
+   * propriétaire `brasso-recipe` v1. La conversion vit dans `portability.ts`.
+   */
+  async exportRecipe(id: string): Promise<RecipeExport> {
+    return buildRecipeExport(await this.get(id));
+  }
+
+  /**
+   * Importe une recette (BeerXML ou JSON propriétaire) : détecte le format, parse
+   * via `core`, puis crée un `DRAFT` version 1 (nouvelle famille) en réutilisant le
+   * CRUD M2-01/M2-02 (mêmes validations : Zod, cohérence moteur). Un fichier
+   * invalide lève `RecipeImportError` (422, chemins des champs fautifs).
+   */
+  async importRecipe(payload: unknown): Promise<RecipeWithDetails> {
+    const parsed = parseImport(payload);
+    const created = await this.create(parsed.createBody);
+    let result = created;
+    if (parsed.ingredients.length > 0) {
+      result = await this.replaceIngredients(created.id, { ingredients: parsed.ingredients });
+    }
+    if (parsed.steps.length > 0) {
+      result = await this.replaceSteps(created.id, { steps: parsed.steps });
+    }
+    return result;
   }
 
   /** Archive une recette publiée (`PUBLISHED → ARCHIVED`, ADR-07). */

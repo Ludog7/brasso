@@ -61,6 +61,36 @@ export function publicationErrors(error: unknown): string[] | null {
   return [];
 }
 
+/**
+ * Extrait les messages d'un import refusé (422 `IMPORT_INVALID`, M2-12) : parse
+ * ou validation échouée. Renvoie la liste de libellés lisibles si l'erreur est bien
+ * un refus d'import ; `null` sinon (à traiter génériquement).
+ */
+export function importErrors(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || error.code !== "IMPORT_INVALID") {
+    return null;
+  }
+  const details = error.details;
+  if (details && typeof details === "object" && "messages" in details) {
+    const messages = (details as { messages: unknown }).messages;
+    if (Array.isArray(messages) && messages.every((m) => typeof m === "string")) {
+      return messages as string[];
+    }
+  }
+  return [];
+}
+
+/** Détecte le format d'un fichier importé d'après son contenu (XML BeerXML vs JSON). */
+export function detectImportFormat(content: string): "beerxml" | "json" {
+  return content.trimStart().startsWith("<") ? "beerxml" : "json";
+}
+
+/** Nom de fichier proposé par l'API dans `Content-Disposition`, si présent. */
+function filenameFromDisposition(header: string | null): string | undefined {
+  if (!header) return undefined;
+  return /filename="?([^"]+)"?/.exec(header)?.[1];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -207,6 +237,13 @@ export interface RecipeListFilters {
   familyId?: string;
 }
 
+/** Fichier d'export d'une recette (M2-12) : contenu brut + nom + type MIME. */
+export interface RecipeExportFile {
+  filename: string;
+  content: string;
+  contentType: string;
+}
+
 export const recipesApi = {
   list: (filters: RecipeListFilters = {}): Promise<RecipeSummary[]> => {
     const qs = new URLSearchParams();
@@ -263,6 +300,41 @@ export const recipesApi = {
     request<{ recipe: RecipeDetail }>(`/api/recipes/${id}/archive`, { method: "POST" }).then(
       (r) => r.recipe,
     ),
+
+  // ── Import / export (M2-12). BEER → BeerXML ; ALT/SOFT → JSON `brasso-recipe`. ──
+
+  /** Télécharge le fichier d'export d'une recette (format selon le moteur). */
+  exportRecipe: async (id: string): Promise<RecipeExportFile> => {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/recipes/${id}/export`, { credentials: "include" });
+    } catch {
+      throw new ApiError(0, "NETWORK", "Impossible de joindre le serveur");
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as ApiErrorBody | null;
+      throw new ApiError(
+        res.status,
+        body?.error?.code ?? "ERROR",
+        body?.error?.message ?? res.statusText,
+        body?.error?.details,
+      );
+    }
+    const content = await res.text();
+    return {
+      filename: filenameFromDisposition(res.headers.get("content-disposition")) ?? `recette-${id}`,
+      content,
+      contentType: res.headers.get("content-type") ?? "application/octet-stream",
+    };
+  },
+
+  /** Importe un fichier (BeerXML ou JSON `brasso-recipe`) → nouveau DRAFT v1. */
+  importRecipe: (content: string, format: "beerxml" | "json"): Promise<RecipeDetail> =>
+    request<{ recipe: RecipeDetail }>("/api/recipes/import", {
+      method: "POST",
+      headers: { "content-type": format === "beerxml" ? "application/xml" : "application/json" },
+      body: content,
+    }).then((r) => r.recipe),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
