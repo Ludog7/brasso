@@ -50,3 +50,6 @@ export * from "./beerxml/index.js";
 
 // Import/export JSON propriétaire brasso-recipe v1 — ALT_FERMENTED / SOFT_DRINK (M2-11).
 export * from "./interchange/index.js";
+
+// Plan d'eau & volumes d'équipement — assemblage matériel du brassage (M3-01, FORMULES §6).
+export * from "./equipment/index.js";
