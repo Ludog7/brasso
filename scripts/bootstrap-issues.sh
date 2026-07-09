@@ -111,7 +111,7 @@ find_issue() { # $1 = id ("M0-01") ou titre exact -> number|empty
     --jq "map(select(.title==\"$1\" or (.title | startswith(\"$1 \")))) | .[0].number // empty" 2>/dev/null || true
 }
 log "Issues filles…"
-for ms in M0 M1 M2; do
+for ms in M0 M1 M2 M3; do
   for f in "$ISSUES_DIR/$ms"/*.md; do
     [ -e "$f" ] || continue
     id="$(get_id "$f")"; title="$(get_title "$f")"
@@ -143,7 +143,7 @@ build_sedscript() {
 }
 log "Résolution des dépendances…"
 SEDSCRIPT="$(build_sedscript)"
-for ms in M0 M1 M2; do
+for ms in M0 M1 M2 M3; do
   for f in "$ISSUES_DIR/$ms"/*.md; do
     [ -e "$f" ] || continue
     grep -q '{{M' "$f" || continue
@@ -175,7 +175,7 @@ checklist_for() { # $1 = M0|M1
   done
 }
 log "Epics…"
-for ms in M0 M1 M2; do
+for ms in M0 M1 M2 M3; do
   ef="$ISSUES_DIR/epics/$ms-epic.md"
   [ -e "$ef" ] || continue
   etitle="$(get_title "$ef")"; emilestone="$(fm_field "$ef" milestone)"
