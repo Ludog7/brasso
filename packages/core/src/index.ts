@@ -47,3 +47,6 @@ export * from "./reference/index.js";
 
 // Import/export BeerXML 1.0 — moteur BEER uniquement (M2-10, spec « scope limité »).
 export * from "./beerxml/index.js";
+
+// Import/export JSON propriétaire brasso-recipe v1 — ALT_FERMENTED / SOFT_DRINK (M2-11).
+export * from "./interchange/index.js";
