@@ -128,6 +128,24 @@ export function useNewVersionRecipe(id: string) {
   });
 }
 
+/**
+ * Importe un fichier de recette (BeerXML ou JSON `brasso-recipe`, M2-12) → nouveau
+ * DRAFT v1. En succès, amorce le cache détail et invalide les listes ; l'appelant
+ * redirige vers l'éditeur du brouillon créé. Un 422 porte les messages d'erreur
+ * (cf. `importErrors`).
+ */
+export function useImportRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ content, format }: { content: string; format: "beerxml" | "json" }) =>
+      recipesApi.importRecipe(content, format),
+    onSuccess: (recipe) => {
+      qc.setQueryData(recipeKeys.detail(recipe.id), recipe);
+      void qc.invalidateQueries({ queryKey: recipeKeys.all });
+    },
+  });
+}
+
 /** Archive une recette publiée (`PUBLISHED → ARCHIVED`). */
 export function useArchiveRecipe(id: string) {
   const qc = useQueryClient();
