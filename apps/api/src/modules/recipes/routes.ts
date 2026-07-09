@@ -115,8 +115,12 @@ export const recipesRoutes: FastifyPluginAsync<RecipesRoutesOptions> = async (ap
     },
   );
 
-  app.post("/recipes/import", { config: app.rbac("recettes", "create") }, async (request, reply) => {
-    const recipe = await service.importRecipe(request.body);
-    return reply.code(201).send({ recipe });
-  });
+  app.post(
+    "/recipes/import",
+    { config: app.rbac("recettes", "create") },
+    async (request, reply) => {
+      const recipe = await service.importRecipe(request.body);
+      return reply.code(201).send({ recipe });
+    },
+  );
 };

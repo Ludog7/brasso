@@ -977,7 +977,10 @@ describe("module recipes — import/export (M2-12)", () => {
   };
 
   const createRecipe = async (payload: unknown): Promise<string> => {
-    const res = await inject(app, "POST", "/api/recipes", { cookie: cookieFor("brasseur"), payload });
+    const res = await inject(app, "POST", "/api/recipes", {
+      cookie: cookieFor("brasseur"),
+      payload,
+    });
     return res.json().recipe.id;
   };
 
@@ -1069,7 +1072,9 @@ describe("module recipes — import/export (M2-12)", () => {
       expect(recipe).toMatchObject({ engine: "ALT_FERMENTED", status: "DRAFT", version: 1 });
       expect(recipe.altDetails).toMatchObject({ baseType: "gingembre", targetPh: 3.4 });
       // Nouvelle famille : import = recette indépendante, pas une version de la source.
-      const src = await inject(app, "GET", `/api/recipes/${srcId}`, { cookie: cookieFor("brasseur") });
+      const src = await inject(app, "GET", `/api/recipes/${srcId}`, {
+        cookie: cookieFor("brasseur"),
+      });
       expect(recipe.familyId).not.toBe(src.json().recipe.familyId);
     } finally {
       await close();
@@ -1087,8 +1092,20 @@ describe("module recipes — import/export (M2-12)", () => {
         cookie: cookieFor("brasseur"),
         payload: {
           ingredients: [
-            { category: "MALT", name: "Pale", amount: 5000, params: { isMashable: true, potentialSg: 1.037, colorEbc: 4 } },
-            { category: "HOP", name: "Cascade", amount: 30, use: "BOIL", timeMinutes: 60, params: { alphaFraction: 0.06 } },
+            {
+              category: "MALT",
+              name: "Pale",
+              amount: 5000,
+              params: { isMashable: true, potentialSg: 1.037, colorEbc: 4 },
+            },
+            {
+              category: "HOP",
+              name: "Cascade",
+              amount: 30,
+              use: "BOIL",
+              timeMinutes: 60,
+              params: { alphaFraction: 0.06 },
+            },
             { category: "YEAST", name: "US-05", amount: 11, params: { attenuationPct: 78 } },
           ],
         },
@@ -1138,7 +1155,12 @@ describe("module recipes — import/export (M2-12)", () => {
       expect(beerRes.statusCode).toBe(422);
       expect(beerRes.json().error.code).toBe("IMPORT_INVALID");
 
-      const payloadVersion = { format: "brasso-recipe", formatVersion: 99, engine: "ALT_FERMENTED", recipe: {} };
+      const payloadVersion = {
+        format: "brasso-recipe",
+        formatVersion: 99,
+        engine: "ALT_FERMENTED",
+        recipe: {},
+      };
       expect((await importJson(payloadVersion)).statusCode).toBe(422);
     } finally {
       await close();

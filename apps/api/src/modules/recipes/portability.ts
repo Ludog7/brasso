@@ -340,13 +340,11 @@ function fromInterchange(data: unknown): ParsedImport {
         ...(ing.params != null ? { params: ing.params } : {}),
       }) as RecipeIngredientInput,
   );
-  const steps = envelope.recipe.steps.map(
-    (step): RecipeStepInput => ({
-      type: step.type,
-      ...(step.name != null ? { name: step.name } : {}),
-      params: step.params,
-    }),
-  );
+  const steps = envelope.recipe.steps.map((step): RecipeStepInput => ({
+    type: step.type,
+    ...(step.name != null ? { name: step.name } : {}),
+    params: step.params,
+  }));
 
   const createBody: RecipeCreateBody =
     envelope.engine === "ALT_FERMENTED"
