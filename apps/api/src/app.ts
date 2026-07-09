@@ -7,6 +7,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AppConfig } from "./config.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { authRoutes } from "./modules/auth/routes.js";
+import type { EquipmentRepository } from "./modules/equipment/repository.js";
+import { equipmentRoutes } from "./modules/equipment/routes.js";
 import { healthRoutes } from "./modules/health/routes.js";
 import type { RecipeRepository } from "./modules/recipes/repository.js";
 import { recipesRoutes } from "./modules/recipes/routes.js";
@@ -24,6 +26,8 @@ export interface BuildAppOptions {
   authRepository?: AuthRepository;
   /** Repository de recettes injecté (tests) ; sinon adossé à Prisma. */
   recipeRepository?: RecipeRepository;
+  /** Repository de profils d'équipement injecté (tests) ; sinon adossé à Prisma. */
+  equipmentRepository?: EquipmentRepository;
   /** Repository de catalogue injecté (tests) ; sinon adossé à Prisma. */
   catalogRepository?: CatalogRepository;
 }
@@ -54,6 +58,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(recipesRoutes, { prefix: "/api", repository: opts.recipeRepository });
+  await app.register(equipmentRoutes, { prefix: "/api", repository: opts.equipmentRepository });
   await app.register(referentialsRoutes, {
     prefix: "/api",
     catalogRepository: opts.catalogRepository,
