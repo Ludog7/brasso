@@ -1,0 +1,51 @@
+import { prisma } from "@brasso/db";
+import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
+
+import type { RecipeRepository } from "../recipes/repository.js";
+import { PrismaRecipeRepository } from "../recipes/repository.js";
+import type { BatchRepository } from "./repository.js";
+import { PrismaBatchRepository } from "./repository.js";
+import { batchCreateBody, batchListQuery } from "./schema.js";
+import { BatchService } from "./service.js";
+
+export interface BatchesRoutesOptions {
+  /** Repository de batchs injecté (tests) ; sinon adossé à Prisma. */
+  repository?: BatchRepository;
+  /** Repository de recettes injecté (tests) ; partagé avec le module `recipes`. */
+  recipeRepository?: RecipeRepository;
+}
+
+const idParams = z.object({ id: z.string().min(1) });
+
+/**
+ * Module `batches` (M3-04, ADR-07) — planification d'un batch depuis une recette
+ * publiée (snapshot figé + numéro). RBAC sur la ressource `recettes` (domaine
+ * brassage, matrice §3.5 figée ADR-10) : brasseur/admin create+read, caisse read.
+ */
+export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (app, opts) => {
+  const repository = opts.repository ?? new PrismaBatchRepository(prisma);
+  const recipeRepository = opts.recipeRepository ?? new PrismaRecipeRepository(prisma);
+  const service = new BatchService(repository, recipeRepository);
+
+  app.get("/batches", { config: app.rbac("recettes", "read") }, async (request) => {
+    const filters = batchListQuery.parse(request.query);
+    return { batches: await service.list(filters) };
+  });
+
+  app.get("/batches/:id", { config: app.rbac("recettes", "read") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { batch: await service.get(id) };
+  });
+
+  app.post("/batches", { config: app.rbac("recettes", "create") }, async (request, reply) => {
+    const body = batchCreateBody.parse(request.body);
+    const batch = await service.plan(body);
+    return reply.code(201).send({ batch });
+  });
+
+  app.post("/batches/:id/cancel", { config: app.rbac("recettes", "update") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { batch: await service.cancel(id) };
+  });
+};
