@@ -4,6 +4,7 @@
  */
 export * from "./batch.js";
 export * from "./enums.js";
+export * from "./equipment.js";
 export * from "./measurement.js";
 export * from "./recipe.js";
 export * from "./recipeParts.js";
