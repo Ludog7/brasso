@@ -443,3 +443,77 @@ export const equipmentApi = {
       method: "POST",
     }).then((r) => r.profile),
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batchs (M3-04/05 api / M3-08 web). Miroir de `BatchDetailView` côté API ; dates
+// sérialisées ISO. La planification fige un snapshot immuable + un numéro et
+// réserve le stock des ingrédients catalogués (M3-05).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type BatchStatus =
+  "PLANIFIE" | "EN_BRASSAGE" | "EN_FERMENTATION" | "EN_CONDITIONNEMENT" | "TERMINE" | "ANNULE";
+
+export type ReservationStatus = "RESERVED" | "CONSUMED" | "RELEASED";
+
+/** Réservation de stock d'un batch (miroir de `ReservationView`). */
+export interface BatchReservation {
+  id: string;
+  catalogItemId: string;
+  quantity: number;
+  status: ReservationStatus;
+}
+
+/** Vue détaillée d'un batch (miroir de `BatchDetailView`). */
+export interface BatchDetail {
+  id: string;
+  batchNumber: number;
+  recipeId: string;
+  recipeVersion: number;
+  equipmentProfileId: string | null;
+  status: BatchStatus;
+  plannedAt: string | null;
+  brewedAt: string | null;
+  fermentedAt: string | null;
+  packagedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  recipeSnapshot: unknown;
+  reservations: BatchReservation[];
+}
+
+/** Avertissement de stock insuffisant (indicatif, non bloquant — M3-05). */
+export interface StockWarning {
+  catalogItemId: string;
+  name: string;
+  requested: number;
+  available: number;
+}
+
+/** Résultat de planification : le batch + le bilan de réservation. */
+export interface BatchPlanResult {
+  batch: BatchDetail;
+  /** Ingrédients hors catalogue (saisis à la main) → non réservés. */
+  unreservedIngredients: string[];
+  /** Articles dont le stock disponible est inférieur au besoin (non bloquant). */
+  stockWarnings: StockWarning[];
+}
+
+export interface BatchCreateInput {
+  recipeId: string;
+  equipmentProfileId?: string;
+  /** Date planifiée (ISO) — optionnelle. */
+  plannedAt?: string;
+}
+
+export const batchesApi = {
+  get: (id: string): Promise<BatchDetail> =>
+    request<{ batch: BatchDetail }>(`/api/batches/${id}`).then((r) => r.batch),
+
+  /** Planifie un batch depuis une recette publiée → renvoie le bilan de réservation. */
+  plan: (input: BatchCreateInput): Promise<BatchPlanResult> =>
+    request<BatchPlanResult>("/api/batches", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+};
