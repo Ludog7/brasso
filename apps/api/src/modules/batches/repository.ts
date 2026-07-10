@@ -8,7 +8,7 @@
  * (déduction, inventaires, seuils) relève de M5, qui possédera le module `stock`.
  */
 
-import type { BatchStatus, Prisma, PrismaClient, ReservationStatus } from "@brasso/db";
+import type { BatchStatus, MeasureType, Prisma, PrismaClient, ReservationStatus } from "@brasso/db";
 
 /** Réservation de stock d'un batch (vue). L'unité est celle du `CatalogItem`. */
 export interface ReservationView {
@@ -16,6 +16,27 @@ export interface ReservationView {
   catalogItemId: string;
   quantity: number;
   status: ReservationStatus;
+}
+
+/** Mesure relevée sur un batch (vue append-only). */
+export interface MeasureView {
+  id: string;
+  type: MeasureType;
+  value: number;
+  unit: string | null;
+  phase: string | null;
+  loggedById: string | null;
+  loggedAt: Date;
+}
+
+/** Données d'une mesure à enregistrer (le service a validé bornes + type). */
+export interface MeasureCreateData {
+  type: MeasureType;
+  value: number;
+  unit?: string;
+  phase?: string;
+  /** Antidatage optionnel ; sinon `now()` (défaut DB). */
+  loggedAt?: Date;
 }
 
 /** Vue résumée d'un batch (liste) — sans snapshot ni réservations. */
@@ -74,6 +95,19 @@ export interface BatchRepository {
   cancel(id: string): Promise<BatchDetailView>;
   /** Stock disponible par article : Σ mouvements − Σ réservations `RESERVED`. */
   availableByItem(catalogItemIds: string[]): Promise<Map<string, number>>;
+  /** Enregistre une mesure append-only. `loggedById` = utilisateur courant. */
+  addMeasure(
+    batchId: string,
+    data: MeasureCreateData,
+    loggedById: string | null,
+  ): Promise<MeasureView>;
+  /** Mesures d'un batch, chronologiques (`loggedAt` croissant), filtrables par type. */
+  listMeasures(batchId: string, type?: MeasureType): Promise<MeasureView[]>;
+  /**
+   * Applique une transition de statut simple (hors state machine Jour J) et
+   * horodate le jalon correspondant. Le service a déjà validé la légalité.
+   */
+  transition(id: string, status: BatchStatus): Promise<BatchDetailView>;
 }
 
 const SUMMARY_SELECT = {
@@ -99,6 +133,32 @@ const DETAIL_SELECT = {
     select: { id: true, catalogItemId: true, quantity: true, status: true },
   },
 } as const;
+
+const MEASURE_SELECT = {
+  id: true,
+  type: true,
+  value: true,
+  unit: true,
+  phase: true,
+  loggedById: true,
+  loggedAt: true,
+} as const;
+
+/** Jalon horodaté par une transition de statut (linéaire, ADR-08 hors périmètre). */
+function milestonePatch(status: BatchStatus, at: Date): Prisma.BatchUpdateInput {
+  switch (status) {
+    case "EN_BRASSAGE":
+      return { brewedAt: at };
+    case "EN_FERMENTATION":
+      return { fermentedAt: at };
+    case "EN_CONDITIONNEMENT":
+      return { packagedAt: at };
+    case "TERMINE":
+      return { completedAt: at };
+    default:
+      return {};
+  }
+}
 
 export class PrismaBatchRepository implements BatchRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -150,6 +210,41 @@ export class PrismaBatchRepository implements BatchRepository {
         data: { status: "RELEASED" },
       });
       return tx.batch.update({ where: { id }, data: { status: "ANNULE" }, select: DETAIL_SELECT });
+    });
+  }
+
+  addMeasure(
+    batchId: string,
+    data: MeasureCreateData,
+    loggedById: string | null,
+  ): Promise<MeasureView> {
+    return this.prisma.batchMeasure.create({
+      data: {
+        batchId,
+        type: data.type,
+        value: data.value,
+        unit: data.unit ?? null,
+        phase: data.phase ?? null,
+        loggedById,
+        ...(data.loggedAt ? { loggedAt: data.loggedAt } : {}),
+      },
+      select: MEASURE_SELECT,
+    });
+  }
+
+  listMeasures(batchId: string, type?: MeasureType): Promise<MeasureView[]> {
+    return this.prisma.batchMeasure.findMany({
+      where: { batchId, ...(type ? { type } : {}) },
+      select: MEASURE_SELECT,
+      orderBy: { loggedAt: "asc" },
+    });
+  }
+
+  transition(id: string, status: BatchStatus): Promise<BatchDetailView> {
+    return this.prisma.batch.update({
+      where: { id },
+      data: { status, ...milestonePatch(status, new Date()) },
+      select: DETAIL_SELECT,
     });
   }
 

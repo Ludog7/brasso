@@ -6,7 +6,13 @@ import type { RecipeRepository } from "../recipes/repository.js";
 import { PrismaRecipeRepository } from "../recipes/repository.js";
 import type { BatchRepository } from "./repository.js";
 import { PrismaBatchRepository } from "./repository.js";
-import { batchCreateBody, batchListQuery } from "./schema.js";
+import {
+  batchCreateBody,
+  batchListQuery,
+  measureCreateBody,
+  measureListQuery,
+  statusChangeBody,
+} from "./schema.js";
 import { BatchService } from "./service.js";
 
 export interface BatchesRoutesOptions {
@@ -19,9 +25,11 @@ export interface BatchesRoutesOptions {
 const idParams = z.object({ id: z.string().min(1) });
 
 /**
- * Module `batches` (M3-04, ADR-07) — planification d'un batch depuis une recette
- * publiée (snapshot figé + numéro). RBAC sur la ressource `recettes` (domaine
- * brassage, matrice §3.5 figée ADR-10) : brasseur/admin create+read, caisse read.
+ * Module `batches` (M3-04/05/06, ADR-07) — planification d'un batch depuis une
+ * recette publiée (snapshot figé + numéro + réservation de stock), mesures
+ * append-only et progression administrative de statut (hors state machine Jour J,
+ * M4). RBAC sur la ressource `recettes` (domaine brassage, matrice §3.5 figée
+ * ADR-10) : brasseur/admin CRUD (mesures + statut = `update`), caisse read.
  */
 export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (app, opts) => {
   const repository = opts.repository ?? new PrismaBatchRepository(prisma);
@@ -47,5 +55,28 @@ export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (ap
   app.post("/batches/:id/cancel", { config: app.rbac("recettes", "update") }, async (request) => {
     const { id } = idParams.parse(request.params);
     return { batch: await service.cancel(id) };
+  });
+
+  app.post(
+    "/batches/:id/measures",
+    { config: app.rbac("recettes", "update") },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const body = measureCreateBody.parse(request.body);
+      const measure = await service.addMeasure(id, body, request.user?.id ?? null);
+      return reply.code(201).send({ measure });
+    },
+  );
+
+  app.get("/batches/:id/measures", { config: app.rbac("recettes", "read") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { type } = measureListQuery.parse(request.query);
+    return { measures: await service.listMeasures(id, type) };
+  });
+
+  app.post("/batches/:id/status", { config: app.rbac("recettes", "update") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { status } = statusChangeBody.parse(request.body);
+    return { batch: await service.changeStatus(id, status) };
   });
 };

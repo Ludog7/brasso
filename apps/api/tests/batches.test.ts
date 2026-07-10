@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { BatchStatus, MeasureType } from "@brasso/core";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -16,6 +17,8 @@ import type {
   BatchListFilters,
   BatchRepository,
   BatchSummaryView,
+  MeasureCreateData,
+  MeasureView,
   ReservationInput,
 } from "../src/modules/batches/repository.js";
 import type { RecipeRepository, RecipeWithDetails } from "../src/modules/recipes/repository.js";
@@ -110,6 +113,7 @@ function summaryOf(b: BatchDetailView): BatchSummaryView {
 class InMemoryBatchRepository implements BatchRepository {
   private store = new Map<string, BatchDetailView>();
   private stock = new Map<string, number>();
+  private measures: (MeasureView & { batchId: string })[] = [];
   private seq = 0;
 
   /** Amorce un stock disponible pour un article (tests de warning). */
@@ -175,6 +179,50 @@ class InMemoryBatchRepository implements BatchRepository {
   }
   availableByItem(catalogItemIds: string[]): Promise<Map<string, number>> {
     return Promise.resolve(new Map(catalogItemIds.map((id) => [id, this.stock.get(id) ?? 0])));
+  }
+  addMeasure(
+    batchId: string,
+    data: MeasureCreateData,
+    loggedById: string | null,
+  ): Promise<MeasureView> {
+    const record = {
+      batchId,
+      id: `m_${this.measures.length + 1}`,
+      type: data.type,
+      value: data.value,
+      unit: data.unit ?? null,
+      phase: data.phase ?? null,
+      loggedById,
+      loggedAt: data.loggedAt ?? new Date(),
+    };
+    this.measures.push(record);
+    const { batchId: _b, ...view } = record;
+    return Promise.resolve(view);
+  }
+  listMeasures(batchId: string, type?: MeasureType): Promise<MeasureView[]> {
+    const items = this.measures
+      .filter((m) => m.batchId === batchId && (!type || m.type === type))
+      .sort((a, b) => a.loggedAt.getTime() - b.loggedAt.getTime())
+      .map(({ batchId: _b, ...view }) => view);
+    return Promise.resolve(items);
+  }
+  transition(id: string, status: BatchStatus): Promise<BatchDetailView> {
+    const existing = this.store.get(id);
+    if (!existing) throw new Error(`batch ${id} absent (le service garantit son existence)`);
+    const now = new Date();
+    const milestone: Partial<BatchDetailView> =
+      status === "EN_BRASSAGE"
+        ? { brewedAt: now }
+        : status === "EN_FERMENTATION"
+          ? { fermentedAt: now }
+          : status === "EN_CONDITIONNEMENT"
+            ? { packagedAt: now }
+            : status === "TERMINE"
+              ? { completedAt: now }
+              : {};
+    const updated: BatchDetailView = { ...existing, status, ...milestone, updatedAt: now };
+    this.store.set(id, updated);
+    return Promise.resolve(updated);
   }
 }
 
@@ -437,6 +485,203 @@ describe("module batches — planification & réservation (M3-04/M3-05)", () => 
       ).toBe(200);
       expect((await plan({ recipeId: "rec-1" }, "caisse")).statusCode).toBe(403);
       expect((await inject(app, "GET", "/api/batches")).statusCode).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module batches — mesures & transitions de statut (M3-06)", () => {
+  let app: FastifyInstance;
+  let recipes: StubRecipeRepository;
+  let batches: InMemoryBatchRepository;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    recipes = new StubRecipeRepository();
+    batches = new InMemoryBatchRepository();
+    ({ app, cookieFor } = await makeApp(recipes, batches));
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  /** Planifie un batch et renvoie son id (recette publiée seedée à la volée). */
+  const planBatch = async (): Promise<string> => {
+    recipes.insert(publishedRecipe());
+    const res = await inject(app, "POST", "/api/batches", {
+      cookie: cookieFor("brasseur"),
+      payload: { recipeId: "rec-1" },
+    });
+    return res.json().batch.id;
+  };
+
+  const addMeasure = (
+    id: string,
+    payload: unknown,
+    user = "brasseur",
+  ): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", `/api/batches/${id}/measures`, { cookie: cookieFor(user), payload });
+
+  const setStatus = (
+    id: string,
+    status: string,
+    user = "brasseur",
+  ): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", `/api/batches/${id}/status`, {
+      cookie: cookieFor(user),
+      payload: { status },
+    });
+
+  it("enregistre des mesures append-only et les relit dans l'ordre chronologique", async () => {
+    try {
+      const id = await planBatch();
+      const t1 = "2026-07-06T10:00:00.000Z";
+      const t2 = "2026-07-06T18:00:00.000Z";
+      // Saisi en second mais antidaté en premier → doit ressortir en tête.
+      expect(
+        (await addMeasure(id, { type: "TEMPERATURE", value: 20, loggedAt: t2 })).statusCode,
+      ).toBe(201);
+      const created = await addMeasure(id, { type: "GRAVITY", value: 1.052, loggedAt: t1 });
+      expect(created.statusCode).toBe(201);
+      expect(created.json().measure).toMatchObject({ type: "GRAVITY", value: 1.052 });
+
+      const list = await inject(app, "GET", `/api/batches/${id}/measures`, {
+        cookie: cookieFor("brasseur"),
+      });
+      const measures = list.json().measures as { type: string }[];
+      expect(measures.map((m) => m.type)).toEqual(["GRAVITY", "TEMPERATURE"]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("filtre les mesures par type", async () => {
+    try {
+      const id = await planBatch();
+      await addMeasure(id, { type: "GRAVITY", value: 1.05 });
+      await addMeasure(id, { type: "TEMPERATURE", value: 19 });
+      const only = await inject(app, "GET", `/api/batches/${id}/measures?type=GRAVITY`, {
+        cookie: cookieFor("brasseur"),
+      });
+      const measures = only.json().measures as { type: string }[];
+      expect(measures).toHaveLength(1);
+      expect(measures[0].type).toBe("GRAVITY");
+    } finally {
+      await close();
+    }
+  });
+
+  it("refuse une mesure hors bornes de plausibilité (400)", async () => {
+    try {
+      const id = await planBatch();
+      const res = await addMeasure(id, { type: "PH", value: 20 }); // pH ∉ [0, 14]
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe("VALIDATION");
+    } finally {
+      await close();
+    }
+  });
+
+  it("mesure sur un batch inexistant → 404", async () => {
+    try {
+      const res = await addMeasure("absent", { type: "GRAVITY", value: 1.05 });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error.code).toBe("NOT_FOUND");
+    } finally {
+      await close();
+    }
+  });
+
+  it("avance le statut cran par cran et horodate chaque jalon", async () => {
+    try {
+      const id = await planBatch();
+
+      const brew = await setStatus(id, "EN_BRASSAGE");
+      expect(brew.statusCode).toBe(200);
+      expect(brew.json().batch.status).toBe("EN_BRASSAGE");
+      expect(brew.json().batch.brewedAt).not.toBeNull();
+
+      expect((await setStatus(id, "EN_FERMENTATION")).json().batch.fermentedAt).not.toBeNull();
+      expect((await setStatus(id, "EN_CONDITIONNEMENT")).json().batch.packagedAt).not.toBeNull();
+      const done = await setStatus(id, "TERMINE");
+      expect(done.json().batch.status).toBe("TERMINE");
+      expect(done.json().batch.completedAt).not.toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  it("refuse un saut d'étape ou un retour arrière (409 INVALID_TRANSITION)", async () => {
+    try {
+      const id = await planBatch();
+      // Saut PLANIFIE → EN_FERMENTATION
+      const skip = await setStatus(id, "EN_FERMENTATION");
+      expect(skip.statusCode).toBe(409);
+      expect(skip.json().error.code).toBe("INVALID_TRANSITION");
+
+      await setStatus(id, "EN_BRASSAGE");
+      // Retour arrière EN_BRASSAGE → PLANIFIE
+      const back = await setStatus(id, "PLANIFIE");
+      expect(back.statusCode).toBe(409);
+      expect(back.json().error.code).toBe("INVALID_TRANSITION");
+    } finally {
+      await close();
+    }
+  });
+
+  it("annule via /status (réservations libérées) ; un batch terminé n'est plus annulable", async () => {
+    try {
+      recipes.insert(
+        publishedRecipe({ ingredients: [ingredient("i1", "Pilsner", "cat-malt", 4000)] }),
+      );
+      batches.setStock("cat-malt", 10000);
+      const id = (
+        await inject(app, "POST", "/api/batches", {
+          cookie: cookieFor("brasseur"),
+          payload: { recipeId: "rec-1" },
+        })
+      ).json().batch.id;
+
+      const cancelled = await setStatus(id, "ANNULE");
+      expect(cancelled.statusCode).toBe(200);
+      expect(cancelled.json().batch.status).toBe("ANNULE");
+      expect(cancelled.json().batch.reservations[0].status).toBe("RELEASED");
+
+      // ANNULE est terminal : plus aucune transition.
+      expect((await setStatus(id, "EN_BRASSAGE")).statusCode).toBe(409);
+    } finally {
+      await close();
+    }
+  });
+
+  it("un batch TERMINE ne peut plus être annulé (409)", async () => {
+    try {
+      const id = await planBatch();
+      await setStatus(id, "EN_BRASSAGE");
+      await setStatus(id, "EN_FERMENTATION");
+      await setStatus(id, "EN_CONDITIONNEMENT");
+      await setStatus(id, "TERMINE");
+      const res = await setStatus(id, "ANNULE");
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.code).toBe("INVALID_TRANSITION");
+    } finally {
+      await close();
+    }
+  });
+
+  it("RBAC : caisse lit les mesures mais ne mesure/transitionne pas", async () => {
+    try {
+      const id = await planBatch();
+      await addMeasure(id, { type: "GRAVITY", value: 1.05 });
+      expect(
+        (await inject(app, "GET", `/api/batches/${id}/measures`, { cookie: cookieFor("caisse") }))
+          .statusCode,
+      ).toBe(200);
+      expect((await addMeasure(id, { type: "GRAVITY", value: 1.05 }, "caisse")).statusCode).toBe(
+        403,
+      );
+      expect((await setStatus(id, "EN_BRASSAGE", "caisse")).statusCode).toBe(403);
     } finally {
       await close();
     }
