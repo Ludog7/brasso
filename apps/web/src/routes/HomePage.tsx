@@ -1,4 +1,4 @@
-import { BookOpen, Loader2, LogOut } from "lucide-react";
+import { BookOpen, Loader2, LogOut, Wrench } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useLogout } from "@/hooks/useAuth";
@@ -29,12 +29,20 @@ export function HomePage() {
       </header>
 
       <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-        <Button asChild size="lg" className="self-start">
-          <Link to="/recipes">
-            <BookOpen className="size-5" aria-hidden="true" />
-            Recettes
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-3">
+          <Button asChild size="lg" className="self-start">
+            <Link to="/recipes">
+              <BookOpen className="size-5" aria-hidden="true" />
+              Recettes
+            </Link>
+          </Button>
+          <Button asChild size="lg" variant="outline" className="self-start">
+            <Link to="/equipment">
+              <Wrench className="size-5" aria-hidden="true" />
+              Équipement
+            </Link>
+          </Button>
+        </div>
 
         <Card>
           <CardHeader>

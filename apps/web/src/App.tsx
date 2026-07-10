@@ -3,6 +3,9 @@ import { type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { useBootstrapSession } from "@/hooks/useAuth";
+import { EditEquipmentPage } from "@/routes/equipment/EditEquipmentPage";
+import { EquipmentListPage } from "@/routes/equipment/EquipmentListPage";
+import { NewEquipmentPage } from "@/routes/equipment/NewEquipmentPage";
 import { HomePage } from "@/routes/HomePage";
 import { LoginPage } from "@/routes/LoginPage";
 import { NewRecipePage } from "@/routes/recipes/NewRecipePage";
@@ -52,6 +55,9 @@ export function App() {
         <Route path="/recipes/new" element={<NewRecipePage />} />
         <Route path="/recipes/:id" element={<RecipeDetailPage />} />
         <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
+        <Route path="/equipment" element={<EquipmentListPage />} />
+        <Route path="/equipment/new" element={<NewEquipmentPage />} />
+        <Route path="/equipment/:id/edit" element={<EditEquipmentPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
