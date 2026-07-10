@@ -2,29 +2,15 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { useBatch } from "@/features/batches/hooks";
+import { FERMENTATION_STEP_LABELS, STATUS_LABELS, STATUS_TONE } from "@/features/batches/labels";
+import { MeasuresJournal } from "@/features/batches/MeasuresJournal";
+import { fermentationPlanFromSnapshot } from "@/features/batches/planning";
+import { StatusActions } from "@/features/batches/StatusActions";
 import { useEquipmentProfile } from "@/features/equipment/hooks";
-import type { BatchStatus, StockWarning } from "@/lib/api";
-import { Badge, type BadgeProps } from "@/ui/badge";
+import type { BatchDetail, StockWarning } from "@/lib/api";
+import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
-
-const STATUS_LABELS: Record<BatchStatus, string> = {
-  PLANIFIE: "Planifié",
-  EN_BRASSAGE: "En brassage",
-  EN_FERMENTATION: "En fermentation",
-  EN_CONDITIONNEMENT: "En conditionnement",
-  TERMINE: "Terminé",
-  ANNULE: "Annulé",
-};
-
-const STATUS_TONE: Record<BatchStatus, NonNullable<BadgeProps["tone"]>> = {
-  PLANIFIE: "accent",
-  EN_BRASSAGE: "accent",
-  EN_FERMENTATION: "accent",
-  EN_CONDITIONNEMENT: "accent",
-  TERMINE: "success",
-  ANNULE: "muted",
-};
 
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" });
 
@@ -42,6 +28,27 @@ function namesFromSnapshot(snapshot: unknown): Map<string, string> {
     }
   }
   return map;
+}
+
+/** Nom de la recette figée dans le snapshot (lecture seule). */
+function recipeNameFromSnapshot(snapshot: unknown): string | null {
+  if (snapshot && typeof snapshot === "object") {
+    const name = (snapshot as { name?: unknown }).name;
+    if (typeof name === "string") return name;
+  }
+  return null;
+}
+
+/** Jalons horodatés à afficher (M3-06) — seuls ceux renseignés apparaissent. */
+function keyDates(batch: BatchDetail): { label: string; iso: string }[] {
+  const entries: { label: string; iso: string | null }[] = [
+    { label: "Planifié le", iso: batch.plannedAt },
+    { label: "Brassé le", iso: batch.brewedAt },
+    { label: "Mis en fermentation le", iso: batch.fermentedAt },
+    { label: "Conditionné le", iso: batch.packagedAt },
+    { label: "Terminé le", iso: batch.completedAt },
+  ];
+  return entries.filter((e): e is { label: string; iso: string } => e.iso != null);
 }
 
 export function BatchDetailPage() {
@@ -81,7 +88,10 @@ export function BatchDetailPage() {
 
   const data = batch.data;
   const names = namesFromSnapshot(data.recipeSnapshot);
+  const recipeName = recipeNameFromSnapshot(data.recipeSnapshot);
   const reserved = data.reservations.filter((r) => r.status === "RESERVED");
+  const fermentation = fermentationPlanFromSnapshot(data.recipeSnapshot);
+  const dates = keyDates(data);
 
   return (
     <div className="min-h-screen bg-background">
@@ -121,15 +131,77 @@ export function BatchDetailPage() {
             <CardTitle className="text-lg">Informations</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-            <Info label="Recette (version figée)" value={`v${data.recipeVersion}`} />
-            <Info label="Équipement" value={equipment.data?.name ?? "—"} />
             <Info
-              label="Date planifiée"
-              value={data.plannedAt ? dateFmt.format(new Date(data.plannedAt)) : "—"}
+              label="Recette (version figée)"
+              value={
+                recipeName ? `${recipeName} · v${data.recipeVersion}` : `v${data.recipeVersion}`
+              }
             />
+            <Info label="Équipement" value={equipment.data?.name ?? "—"} />
             <Info label="Créé le" value={dateFmt.format(new Date(data.createdAt))} />
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Statut &amp; dates clés</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <StatusActions batch={data} />
+            {dates.length > 0 ? (
+              <ul className="flex flex-col gap-1 text-sm">
+                {dates.map((d) => (
+                  <li key={d.label} className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">{d.label}</span>
+                    <span className="font-medium">{dateFmt.format(new Date(d.iso))}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Plan de fermentation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {fermentation.length > 0 ? (
+              <ol className="flex flex-col gap-2">
+                {fermentation.map((step, i) => (
+                  <li
+                    key={`${step.type}-${i}`}
+                    className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2 last:border-0 last:pb-0"
+                  >
+                    <span>
+                      {FERMENTATION_STEP_LABELS[step.type] ?? step.type}
+                      {step.name ? (
+                        <span className="text-muted-foreground"> — {step.name}</span>
+                      ) : null}
+                    </span>
+                    <span className="flex items-center gap-3 text-sm text-muted-foreground">
+                      <span>{step.tempC != null ? `${step.tempC} °C` : "— °C"}</span>
+                      <span>
+                        {step.durationDays != null
+                          ? `${step.durationDays} j`
+                          : step.durationMin != null
+                            ? `${step.durationMin} min`
+                            : "—"}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Aucune étape de fermentation dans la recette. Plan indicatif, dérivé de la recette
+                figée.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <MeasuresJournal batchId={data.id} />
 
         <Card>
           <CardHeader>
@@ -156,10 +228,6 @@ export function BatchDetailPage() {
             )}
           </CardContent>
         </Card>
-
-        <p className="text-sm text-muted-foreground">
-          Le suivi du batch (mesures, plan de fermentation, journal) arrive prochainement.
-        </p>
       </main>
     </div>
   );
