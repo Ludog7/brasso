@@ -506,6 +506,28 @@ export interface BatchCreateInput {
   plannedAt?: string;
 }
 
+/** Nature d'une mesure relevée sur un batch (miroir de `MeasureType`, M3-06). */
+export type MeasureType = "GRAVITY" | "TEMPERATURE" | "PH" | "VOLUME" | "OTHER";
+
+/** Mesure append-only relevée sur un batch (miroir de `MeasureView`). */
+export interface BatchMeasure {
+  id: string;
+  type: MeasureType;
+  value: number;
+  unit: string | null;
+  phase: string | null;
+  loggedById: string | null;
+  loggedAt: string;
+}
+
+/** Corps d'ajout d'une mesure (`type`, `value`, `unit?`, `phase?`). */
+export interface MeasureCreateInput {
+  type: MeasureType;
+  value: number;
+  unit?: string;
+  phase?: string;
+}
+
 export const batchesApi = {
   get: (id: string): Promise<BatchDetail> =>
     request<{ batch: BatchDetail }>(`/api/batches/${id}`).then((r) => r.batch),
@@ -516,4 +538,26 @@ export const batchesApi = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  /** Mesures d'un batch, chronologiques (filtrables par type). */
+  measures: (id: string, type?: MeasureType): Promise<BatchMeasure[]> => {
+    const suffix = type ? `?type=${type}` : "";
+    return request<{ measures: BatchMeasure[] }>(`/api/batches/${id}/measures${suffix}`).then(
+      (r) => r.measures,
+    );
+  },
+
+  /** Enregistre une mesure append-only sur un batch. */
+  addMeasure: (id: string, input: MeasureCreateInput): Promise<BatchMeasure> =>
+    request<{ measure: BatchMeasure }>(`/api/batches/${id}/measures`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.measure),
+
+  /** Fait progresser le statut d'un batch (transitions M3-06). */
+  changeStatus: (id: string, status: BatchStatus): Promise<BatchDetail> =>
+    request<{ batch: BatchDetail }>(`/api/batches/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }).then((r) => r.batch),
 };

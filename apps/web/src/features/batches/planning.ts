@@ -8,7 +8,7 @@
 
 import { type BrewWaterPlan, computeBrewWaterPlan } from "@brasso/core";
 
-import type { EquipmentProfile, RecipeDetail } from "@/lib/api";
+import type { BatchStatus, EquipmentProfile, RecipeDetail } from "@/lib/api";
 
 /** Catégories comptées dans le grist empâté (grain solide). */
 const GRAIN_CATEGORIES = new Set(["MALT", "ADJUNCT"]);
@@ -90,4 +90,79 @@ export function plannedReservations(recipe: RecipeDetail): {
     }
   }
   return { reservations: [...byItem.values()], unreserved };
+}
+
+// ── Détail batch (M3-09) ──────────────────────────────────────────────────────
+
+/**
+ * Progression administrative linéaire (miroir de la règle serveur M3-06). Sert à
+ * ne proposer côté UI **que** les transitions autorisées.
+ */
+const LINEAR_FLOW: readonly BatchStatus[] = [
+  "PLANIFIE",
+  "EN_BRASSAGE",
+  "EN_FERMENTATION",
+  "EN_CONDITIONNEMENT",
+  "TERMINE",
+];
+
+/** Transitions autorisées depuis un statut : cran suivant + `ANNULE` (sauf terminal). */
+export function allowedTransitions(from: BatchStatus): BatchStatus[] {
+  const targets: BatchStatus[] = [];
+  const index = LINEAR_FLOW.indexOf(from);
+  const next = index >= 0 ? LINEAR_FLOW[index + 1] : undefined;
+  if (next) targets.push(next);
+  if (from !== "TERMINE" && from !== "ANNULE") targets.push("ANNULE");
+  return targets;
+}
+
+/** Étape du plan de fermentation dérivée du snapshot (lecture seule, indicatif). */
+export interface FermentationStep {
+  type: string;
+  name: string | null;
+  tempC: number | null;
+  /** Durée cible en jours (FERMENT/CONDITION) ou minutes (STABILIZE). */
+  durationDays: number | null;
+  durationMin: number | null;
+}
+
+/** Types d'étape retenus pour le plan de fermentation. */
+const FERMENTATION_STEP_TYPES = new Set(["FERMENT", "CONDITION", "STABILIZE"]);
+
+const readNum = (params: unknown, key: string): number | null => {
+  if (params && typeof params === "object" && key in params) {
+    const value = (params as Record<string, unknown>)[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return null;
+};
+
+/**
+ * Dérive le plan de fermentation des étapes `FERMENT`/`CONDITION`/`STABILIZE` du
+ * snapshot figé, ordonnées par `sortOrder`. Best-effort sur un JSON `unknown`.
+ */
+export function fermentationPlanFromSnapshot(snapshot: unknown): FermentationStep[] {
+  if (!snapshot || typeof snapshot !== "object") return [];
+  const steps = (snapshot as { steps?: unknown }).steps;
+  if (!Array.isArray(steps)) return [];
+
+  const rows = steps
+    .filter(
+      (s): s is Record<string, unknown> =>
+        Boolean(s) &&
+        typeof s === "object" &&
+        typeof (s as { type?: unknown }).type === "string" &&
+        FERMENTATION_STEP_TYPES.has((s as { type: string }).type),
+    )
+    .map((s) => ({
+      type: s.type as string,
+      name: typeof s.name === "string" ? s.name : null,
+      sortOrder: typeof s.sortOrder === "number" ? s.sortOrder : 0,
+      tempC: readNum(s.params, "tempC"),
+      durationDays: readNum(s.params, "days"),
+      durationMin: readNum(s.params, "timeMin"),
+    }));
+
+  rows.sort((a, b) => a.sortOrder - b.sortOrder);
+  return rows.map(({ sortOrder: _s, ...step }) => step);
 }
