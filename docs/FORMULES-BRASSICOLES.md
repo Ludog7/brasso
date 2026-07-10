@@ -570,4 +570,57 @@ export const GRAIN_ABSORPTION = 1.0;      // L/kg retenu par la drêche
 
 ---
 
+## Annexe D — Chimie de l'eau (sels brassicoles, indicatif)
+
+> Support de M3-02 (`packages/core/src/water/*`). **Aide à la décision, jamais prescriptif** (ADR-11) : ces ajouts orientent le profil ionique, ils **n'attestent d'aucune conformité** (potabilité, sécurité). Un profil d'eau est décrit par ses ions en **mg/L** (ppm) : `{ calcium (Ca²⁺), magnesium (Mg²⁺), sodium (Na⁺), sulfate (SO₄²⁻), chloride (Cl⁻), bicarbonate (HCO₃⁻) }`.
+
+### D.1 Masses molaires (g/mol)
+
+| Espèce | Masse | Espèce | Masse |
+|---|---|---|---|
+| Ca | 40.078 | SO₄ | 96.056 |
+| Mg | 24.305 | Cl | 35.45 |
+| Na | 22.990 | HCO₃ | 61.016 |
+| H₂O | 18.015 | | |
+
+| Sel (forme usuelle) | Formule | Masse molaire |
+|---|---|---|
+| Gypse | CaSO₄·2H₂O | 172.164 |
+| Chlorure de calcium | CaCl₂·2H₂O | 147.008 |
+| Sel d'Epsom | MgSO₄·7H₂O | 246.466 |
+| Sel de table | NaCl | 58.440 |
+| Bicarbonate de sodium | NaHCO₃ | 84.006 |
+
+### D.2 Apport ionique — mg/L par **gramme de sel dissous par litre** (ppm par g/L)
+
+Dérivé de `apport(ion) = (masse molaire de l'ion / masse molaire du sel) × 1000`. (Équivalent aux tables « g/gal » usuelles divisées par 3.785.)
+
+| Sel | Ca | Mg | Na | SO₄ | Cl | HCO₃ |
+|---|---|---|---|---|---|---|
+| Gypse (CaSO₄·2H₂O) | 232.8 | — | — | 557.9 | — | — |
+| Chlorure de calcium (CaCl₂·2H₂O) | 272.6 | — | — | — | 482.3 | — |
+| Sel d'Epsom (MgSO₄·7H₂O) | — | 98.6 | — | 389.7 | — | — |
+| Sel de table (NaCl) | — | — | 393.4 | — | 606.6 | — |
+| Bicarbonate de sodium (NaHCO₃) | — | — | 273.7 | — | — | 726.3 |
+
+> Les sels ne peuvent qu'**ajouter** des ions ; réduire une concentration passe par la dilution (hors périmètre M3-02).
+
+### D.3 Suggestion d'ajouts (`suggestWaterAdditions`)
+
+Pour un profil `base`, un profil `cible` et un volume `V` (L) : on cherche les doses `d` (g, ≥ 0) des 5 sels **minimisant l'écart quadratique** au besoin ionique `besoin = cible − base` (mg/L). En notant `A` la matrice d'apport (D.2) exprimée en concentration (`A·(d/V)` en mg/L), on résout
+
+```
+min_{x ≥ 0}  ‖A·x − besoin‖²      avec  x = d / V  (g/L),  puis  d = x·V
+```
+
+Problème quadratique convexe à contrainte de positivité (moindres carrés non négatifs). Sorties :
+
+- `additionsG` : les doses `d` (g) par sel — **indicatives**.
+- `achievedProfile` = `base + A·x` (mg/L par ion) ; `residualDelta` = `achievedProfile − cible` (positif = dépassement, négatif = besoin non couvert).
+- `sulfateChlorideRatio` = SO₄ / Cl du profil obtenu (indicateur d'équilibre « souligne l'amertume » ↔ « souligne le malté » ; `null` si Cl = 0).
+
+**Validation (round-trip d'une cible atteignable)** : à partir d'une eau RO (tous ions à 0), dissoudre **6 g de gypse + 4 g de chlorure de calcium dans 20 L** produit la cible `Ca ≈ 124.4 / SO₄ ≈ 167.4 / Cl ≈ 96.5 mg/L` (autres ions nuls). `suggestWaterAdditions(RO, cible, 20)` **retrouve** gypse ≈ 6 g et chlorure de calcium ≈ 4 g (les 3 autres sels ≈ 0), `residualDelta ≈ 0` sur tous les ions, et `sulfateChlorideRatio ≈ 1.74` (167.4 / 96.5). Les colonnes des 5 sels étant linéairement indépendantes, cette solution de résidu nul est unique.
+
+---
+
 *Fin du référentiel. Toutes les valeurs de validation citées sont des ordres de grandeur de contrôle, à confirmer par les tests unitaires.*
