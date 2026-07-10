@@ -1,6 +1,7 @@
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { FermentationCharts } from "@/features/batches/charts/FermentationCharts";
 import { useBatch } from "@/features/batches/hooks";
 import { FERMENTATION_STEP_LABELS, STATUS_LABELS, STATUS_TONE } from "@/features/batches/labels";
 import { MeasuresJournal } from "@/features/batches/MeasuresJournal";
@@ -200,6 +201,8 @@ export function BatchDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        <FermentationCharts batchId={data.id} />
 
         <MeasuresJournal batchId={data.id} />
 
