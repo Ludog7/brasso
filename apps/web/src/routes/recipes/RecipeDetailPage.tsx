@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { FlaskConical, Loader2 } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { ExportRecipeButton } from "@/features/recipes/detail/ExportRecipeButton";
 import { RecipeLifecycleActions } from "@/features/recipes/detail/RecipeLifecycleActions";
@@ -58,6 +58,16 @@ export function RecipeDetailPage() {
       <main className="mx-auto flex max-w-6xl flex-col gap-6 p-6">
         <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
           <RecipeLifecycleActions recipe={data} />
+          {data.status === "PUBLISHED" ? (
+            <div className="border-t border-border pt-4">
+              <Button asChild size="lg">
+                <Link to={`/batches/new/${data.id}`}>
+                  <FlaskConical className="size-5" aria-hidden="true" />
+                  Planifier un batch
+                </Link>
+              </Button>
+            </div>
+          ) : null}
           <div className="border-t border-border pt-4">
             <ExportRecipeButton recipe={data} />
           </div>
