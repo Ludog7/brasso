@@ -4,7 +4,7 @@
  * sont posés côté serveur (ADR-06/07), jamais pilotés par le client.
  */
 
-import { batchStatusSchema } from "@brasso/core";
+import { batchMeasureSchema, batchStatusSchema, measureTypeSchema } from "@brasso/core";
 import { z } from "zod";
 
 /** Corps de planification : référence une recette + un équipement optionnel. */
@@ -21,3 +21,22 @@ export const batchListQuery = z.object({
   recipeId: z.string().min(1).optional(),
 });
 export type BatchListQuery = z.infer<typeof batchListQuery>;
+
+/**
+ * Corps d'une mesure append-only (M3-06). Réutilise `batchMeasureSchema` de core
+ * (bornes de plausibilité par type) + un `loggedAt` optionnel : une relève peut
+ * être antidatée (mesure prise plus tôt, saisie après coup). `loggedById` vient
+ * de l'utilisateur courant, jamais du client.
+ */
+export const measureCreateBody = batchMeasureSchema.and(
+  z.object({ loggedAt: z.coerce.date().optional() }),
+);
+export type MeasureCreateBody = z.infer<typeof measureCreateBody>;
+
+/** Filtre de relecture des mesures (`GET /api/batches/:id/measures?type=`). */
+export const measureListQuery = z.object({ type: measureTypeSchema.optional() });
+export type MeasureListQuery = z.infer<typeof measureListQuery>;
+
+/** Corps de transition de statut (`POST /api/batches/:id/status`). */
+export const statusChangeBody = z.object({ status: batchStatusSchema });
+export type StatusChangeBody = z.infer<typeof statusChangeBody>;

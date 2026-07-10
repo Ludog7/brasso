@@ -5,6 +5,7 @@
  * catalogués. Le batch ne suit jamais les versions ultérieures de la recette.
  */
 
+import type { BatchStatus } from "@brasso/core";
 import type { Prisma } from "@brasso/db";
 
 import type {
@@ -18,6 +19,8 @@ import type {
   BatchListFilters,
   BatchRepository,
   BatchSummaryView,
+  MeasureCreateData,
+  MeasureView,
   ReservationInput,
 } from "./repository.js";
 import type { BatchCreateBody } from "./schema.js";
@@ -40,6 +43,41 @@ export class BatchNotCancelableError extends Error {
     super(`Le batch ${id} (${status}) ne peut pas être annulé`);
     this.name = "BatchNotCancelableError";
   }
+}
+
+/** Transition de statut non autorisée (progression administrative M3-06) → 409. */
+export class InvalidTransitionError extends Error {
+  readonly statusCode = 409;
+  readonly code = "INVALID_TRANSITION";
+  constructor(id: string, from: string, to: string) {
+    super(`Transition ${from} → ${to} interdite pour le batch ${id}`);
+    this.name = "InvalidTransitionError";
+  }
+}
+
+/**
+ * Progression **administrative** linéaire d'un batch (hors state machine Jour J,
+ * ADR-08 / M4). Chaque cran horodate son jalon (voir `milestonePatch`, repo).
+ */
+const LINEAR_FLOW: readonly BatchStatus[] = [
+  "PLANIFIE",
+  "EN_BRASSAGE",
+  "EN_FERMENTATION",
+  "EN_CONDITIONNEMENT",
+  "TERMINE",
+];
+
+/**
+ * Une transition est légale si elle avance d'exactement un cran dans le flux
+ * linéaire, ou passe à `ANNULE` depuis n'importe quel statut sauf terminal
+ * (`TERMINE`/`ANNULE`). Tout le reste (saut, retour arrière, no-op) est refusé.
+ */
+function isTransitionAllowed(from: BatchStatus, to: BatchStatus): boolean {
+  if (to === "ANNULE") {
+    return from !== "TERMINE" && from !== "ANNULE";
+  }
+  const index = LINEAR_FLOW.indexOf(from);
+  return index >= 0 && LINEAR_FLOW[index + 1] === to;
 }
 
 /** Avertissement de stock insuffisant (indicatif, non bloquant en M3). */
@@ -124,6 +162,38 @@ export class BatchService {
       throw new BatchNotCancelableError(id, batch.status);
     }
     return this.repo.cancel(id);
+  }
+
+  /**
+   * Fait progresser le statut d'un batch (progression administrative M3-06, hors
+   * Jour J). Transition illégale → 409 `INVALID_TRANSITION`. Passer à `ANNULE`
+   * libère les réservations (même effet que `cancel`).
+   */
+  async changeStatus(id: string, target: BatchStatus): Promise<BatchDetailView> {
+    const batch = await this.get(id);
+    if (!isTransitionAllowed(batch.status, target)) {
+      throw new InvalidTransitionError(id, batch.status, target);
+    }
+    if (target === "ANNULE") {
+      return this.repo.cancel(id);
+    }
+    return this.repo.transition(id, target);
+  }
+
+  /** Enregistre une mesure append-only sur un batch existant (404 sinon). */
+  async addMeasure(
+    id: string,
+    data: MeasureCreateData,
+    loggedById: string | null,
+  ): Promise<MeasureView> {
+    await this.get(id);
+    return this.repo.addMeasure(id, data, loggedById);
+  }
+
+  /** Relit les mesures d'un batch existant (chronologiques), filtrables par type. */
+  async listMeasures(id: string, type?: MeasureCreateData["type"]): Promise<MeasureView[]> {
+    await this.get(id);
+    return this.repo.listMeasures(id, type);
   }
 }
 
