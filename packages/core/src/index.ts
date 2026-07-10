@@ -53,3 +53,6 @@ export * from "./interchange/index.js";
 
 // Plan d'eau & volumes d'équipement — assemblage matériel du brassage (M3-01, FORMULES §6).
 export * from "./equipment/index.js";
+
+// Profils d'eau & suggestion de sels brassicoles — chimie indicative (M3-02, FORMULES Annexe D, ADR-11).
+export * from "./water/index.js";
