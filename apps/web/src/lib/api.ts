@@ -6,6 +6,7 @@
 import type {
   BjcpStyle,
   CatalogKind,
+  EquipmentProfileInput,
   IngredientCategory,
   IngredientUse,
   ProcessStepType,
@@ -378,4 +379,67 @@ export const referentialsApi = {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return request<{ items: CatalogItem[] }>(`/api/catalog-items${suffix}`).then((r) => r.items);
   },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Profils d'équipement (M3-03 api / M3-07 web). Miroir de `EquipmentProfileView`
+// côté API ; dates sérialisées ISO. Le corps de création réutilise le schéma Zod
+// partagé `@brasso/core` (validation client alignée, ADR-04).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Vue d'un profil d'équipement (miroir de `EquipmentProfileView`). */
+export interface EquipmentProfile {
+  id: string;
+  name: string;
+  nominalVolumeL: number;
+  deadspaceL: number;
+  transferLossL: number;
+  evaporationRateLPerHour: number;
+  grainAbsorptionLPerKg: number;
+  heatingPowerKw: number | null;
+  thermalMassKjPerC: number | null;
+  waterProfiles: unknown;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Corps de création — forme du schéma partagé (`equipmentProfileSchema`). */
+export type EquipmentCreateInput = EquipmentProfileInput;
+/** Patch partiel + réactivation possible (`isActive`). */
+export type EquipmentUpdateInput = Partial<EquipmentProfileInput> & { isActive?: boolean };
+
+export interface EquipmentListFilters {
+  /** `true` = actifs, `false` = inactifs, absent = tous. */
+  active?: boolean;
+}
+
+export const equipmentApi = {
+  list: (filters: EquipmentListFilters = {}): Promise<EquipmentProfile[]> => {
+    const suffix = filters.active === undefined ? "" : `?active=${String(filters.active)}`;
+    return request<{ profiles: EquipmentProfile[] }>(`/api/equipment-profiles${suffix}`).then(
+      (r) => r.profiles,
+    );
+  },
+
+  get: (id: string): Promise<EquipmentProfile> =>
+    request<{ profile: EquipmentProfile }>(`/api/equipment-profiles/${id}`).then((r) => r.profile),
+
+  create: (input: EquipmentCreateInput): Promise<EquipmentProfile> =>
+    request<{ profile: EquipmentProfile }>("/api/equipment-profiles", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.profile),
+
+  update: (id: string, input: EquipmentUpdateInput): Promise<EquipmentProfile> =>
+    request<{ profile: EquipmentProfile }>(`/api/equipment-profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }).then((r) => r.profile),
+
+  /** Désactive un profil (`isActive=false`) — préserve l'historique des batchs. */
+  deactivate: (id: string): Promise<EquipmentProfile> =>
+    request<{ profile: EquipmentProfile }>(`/api/equipment-profiles/${id}/deactivate`, {
+      method: "POST",
+    }).then((r) => r.profile),
 };
