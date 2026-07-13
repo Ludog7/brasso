@@ -3,7 +3,7 @@
  * `DayPhase`) sont déjà en français ; on les rend simplement lisibles à l'écran.
  */
 
-import type { DayPhase, Phase } from "@brasso/core";
+import type { DayPhase, MeasurementKind, Phase } from "@brasso/core";
 
 /** Libellé lisible d'une phase Jour J. */
 export const DAY_PHASE_LABELS: Record<DayPhase, string> = {
@@ -28,4 +28,12 @@ export const PHASE_LABELS: Record<Phase, string> = {
   BOIL: "Ébullition",
   COOLING: "Refroidissement",
   PITCHING: "Ensemencement",
+};
+
+/** Libellé lisible d'un type de mesure (M4-11). */
+export const MEASUREMENT_LABELS: Record<MeasurementKind, string> = {
+  density: "Densité",
+  volume: "Volume",
+  temperature: "Température",
+  ph: "pH",
 };

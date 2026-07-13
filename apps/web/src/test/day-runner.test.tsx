@@ -205,13 +205,15 @@ describe("dérouleur d'étapes Jour J (M4-09)", () => {
   });
 
   it("un rejet (409) est affiché en toast sans avancer l'étape", async () => {
+    // Étape d'ensemencement (sans mesure requise) : « Valider » est proposé, mais le
+    // serveur refuse — on vérifie le toast et l'absence d'avancée.
     scenario = {
-      day: dayView({ phase: "EMPATAGE", cursor: 1, status: "AWAITING_VALIDATION" }),
+      day: dayView({ phase: "ENSEMENCEMENT", cursor: 2, status: "AWAITING_VALIDATION" }),
       onEvent: () =>
         json(409, {
           error: {
             code: "DAY_EVENT_REJECTED",
-            message: "Mesures requises manquantes : temperature.",
+            message: "Étape pas prête à valider.",
           },
         }),
     };
@@ -221,11 +223,9 @@ describe("dérouleur d'étapes Jour J (M4-09)", () => {
 
     await user.click(await screen.findByRole("button", { name: /valider l'étape/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Mesures requises manquantes : temperature.",
-    );
-    // État inchangé : toujours sur l'étape 2/3.
-    expect(screen.getByText("Étape 2 / 3")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Étape pas prête à valider.");
+    // État inchangé : toujours sur l'étape 3/3.
+    expect(screen.getByText("Étape 3 / 3")).toBeInTheDocument();
   });
 
   it("valide la dernière étape → écran de fin vers la fiche batch", async () => {

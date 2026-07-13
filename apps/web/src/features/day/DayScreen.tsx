@@ -98,7 +98,7 @@ export function DayScreen() {
 
       <main className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
         {day ? (
-          <StepRunner day={day} batchId={id} />
+          <StepRunner day={day} batchId={id} snapshot={batch.data.recipeSnapshot} />
         ) : (
           <StartPanel
             onStart={() => startDay.mutate()}
