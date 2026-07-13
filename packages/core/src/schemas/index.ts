@@ -3,6 +3,7 @@
  * types entrée-moteur (`./recipe.js`, M1-12). Réutilisés par l'API et le front.
  */
 export * from "./batch.js";
+export * from "./day.js";
 export * from "./enums.js";
 export * from "./equipment.js";
 export * from "./measurement.js";
