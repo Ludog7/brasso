@@ -7,7 +7,7 @@
  * (plan, transitions, timers) vit dans `core`.
  */
 
-import type { DayPhase, PlanEquipment } from "@brasso/core";
+import type { DayPhase, MeasureType, PlanEquipment } from "@brasso/core";
 import type { BatchStatus, Prisma, PrismaClient } from "@brasso/db";
 
 /** Contexte nécessaire pour démarrer une session : statut + snapshot + profil. */
@@ -35,6 +35,39 @@ export interface DaySessionCreateData {
   revision: number;
 }
 
+/** Effet `RECORD_MEASUREMENT` : une mesure append-only (`BatchMeasure`). */
+export interface MeasureEffect {
+  type: MeasureType;
+  value: number;
+  /** Phase Jour J courante (Prisma `DayPhase`, en chaîne). */
+  phase: string;
+  loggedById: string | null;
+  loggedAt: Date;
+}
+
+/** Effet `FORCE_STEP` : une entrée de journal d'écart (`DeviationLog`). */
+export interface DeviationEffect {
+  step: string;
+  phase: DayPhase | null;
+  reason: string;
+  authorId: string | null;
+  /** Statut de l'étape (StepStatus core) au moment du forçage. */
+  forcedFromStatus: string;
+  /** Horodatage métier (`event.at`). */
+  occurredAt: Date;
+}
+
+/** Instantané + effets à persister après une transition acceptée. */
+export interface DayTransitionData {
+  phase: DayPhase;
+  state: Prisma.InputJsonValue;
+  revision: number;
+  /** Brassin terminé → batch `EN_FERMENTATION` (+ `fermentedAt`). */
+  finished: boolean;
+  measure?: MeasureEffect;
+  deviation?: DeviationEffect;
+}
+
 export interface DayRepository {
   /** Contexte de démarrage d'un batch ; `null` si le batch n'existe pas. */
   getStartContext(batchId: string): Promise<DayStartContext | null>;
@@ -46,6 +79,12 @@ export interface DayRepository {
    * inutile quand le batch est déjà `EN_BRASSAGE`.
    */
   start(batchId: string, data: DaySessionCreateData, fromStatus: BatchStatus): Promise<void>;
+  /**
+   * Persiste une transition acceptée — **atomique** : met à jour l'instantané
+   * (`state`/`revision`/`phase`), insère les effets (mesure, écart) et clôt le
+   * brassin (`EN_FERMENTATION`) si `finished`.
+   */
+  applyEvent(batchId: string, data: DayTransitionData): Promise<void>;
 }
 
 export class PrismaBatchDayRepository implements DayRepository {
@@ -96,6 +135,46 @@ export class PrismaBatchDayRepository implements DayRepository {
         await tx.batch.update({
           where: { id: batchId },
           data: { status: "EN_BRASSAGE", brewedAt: new Date() },
+        });
+      }
+    });
+  }
+
+  async applyEvent(batchId: string, data: DayTransitionData): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.batchDayState.update({
+        where: { batchId },
+        data: { phase: data.phase, state: data.state, revision: data.revision },
+      });
+      if (data.measure) {
+        await tx.batchMeasure.create({
+          data: {
+            batchId,
+            type: data.measure.type,
+            value: data.measure.value,
+            phase: data.measure.phase,
+            loggedById: data.measure.loggedById,
+            loggedAt: data.measure.loggedAt,
+          },
+        });
+      }
+      if (data.deviation) {
+        await tx.deviationLog.create({
+          data: {
+            batchId,
+            step: data.deviation.step,
+            phase: data.deviation.phase,
+            reason: data.deviation.reason,
+            authorId: data.deviation.authorId,
+            forcedFromStatus: data.deviation.forcedFromStatus,
+            occurredAt: data.deviation.occurredAt,
+          },
+        });
+      }
+      if (data.finished) {
+        await tx.batch.update({
+          where: { id: batchId },
+          data: { status: "EN_FERMENTATION", fermentedAt: new Date() },
         });
       }
     });

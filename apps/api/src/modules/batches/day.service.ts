@@ -8,14 +8,26 @@
  * offline sont hors périmètre (M4-05/06/07).
  */
 
-import type { BatchStatus, DayPhase, DayPlan, DayState, StepTiming } from "@brasso/core";
+import type {
+  BatchStatus,
+  DayEvent,
+  DayPhase,
+  DayPlan,
+  DayState,
+  DeviationLog,
+  MeasurementKind,
+  MeasureType,
+  StepTiming,
+} from "@brasso/core";
 import {
   buildDayPlan,
   currentStep,
   dayStateSchema,
   initDayState,
+  isFinished,
   phaseToDayPhase,
   stepTiming,
+  transition,
 } from "@brasso/core";
 import type { Prisma } from "@brasso/db";
 
@@ -42,6 +54,24 @@ export class DaySessionNotFoundError extends Error {
   }
 }
 
+/** Événement refusé par la machine (`transition`) : état **inchangé** → 409. */
+export class DayEventRejectedError extends Error {
+  readonly statusCode = 409;
+  readonly code = "DAY_EVENT_REJECTED";
+  constructor(reason: string) {
+    super(reason);
+    this.name = "DayEventRejectedError";
+  }
+}
+
+/** Mesure Jour J → type de mesure batch (`BatchMeasure.type`). */
+const KIND_TO_MEASURE: Record<MeasurementKind, MeasureType> = {
+  density: "GRAVITY",
+  temperature: "TEMPERATURE",
+  volume: "VOLUME",
+  ph: "PH",
+};
+
 /** Vue exposée d'une session Jour J : plan, état, timings dérivés, phase Prisma. */
 export interface DaySessionView {
   batchStatus: BatchStatus;
@@ -58,6 +88,12 @@ export interface DaySessionView {
 export interface DayStartResult {
   created: boolean;
   day: DaySessionView;
+}
+
+/** Vue après application d'un événement — la session + l'éventuel écart produit. */
+export interface DayEventView extends DaySessionView {
+  /** Intention de log d'écart produite par `FORCE_STEP` (persistée). */
+  deviation?: DeviationLog;
 }
 
 export class BatchDayService {
@@ -109,6 +145,73 @@ export class BatchDayService {
       throw new DaySessionNotFoundError(batchId);
     }
     return this.toView(session);
+  }
+
+  /**
+   * Applique un `DayEvent` (cœur du Jour J, ADR-08) : recharge l'état, exécute la
+   * machine pure `transition` (M1-13). Rejet → 409, **état inchangé**. Sinon
+   * persiste le nouvel état (`revision + 1`), la `phase`, les effets
+   * (`RECORD_MEASUREMENT` → `BatchMeasure`, `FORCE_STEP` → `DeviationLog`) et clôt
+   * le brassin (`EN_FERMENTATION`) en fin de parcours — le tout en transaction.
+   */
+  async applyEvent(batchId: string, event: DayEvent, userId: string | null): Promise<DayEventView> {
+    const session = await this.repo.getSession(batchId);
+    if (!session) {
+      throw new DaySessionNotFoundError(batchId);
+    }
+    const state = dayStateSchema.parse(session.state) as DayState;
+
+    const result = transition(state, event);
+    if (result.rejection !== undefined) {
+      throw new DayEventRejectedError(result.rejection);
+    }
+
+    const newState = result.state;
+    const finished = isFinished(newState);
+    const phase = phaseToDayPhase(currentStep(newState)?.phase ?? null);
+    const revision = session.revision + 1;
+
+    const measure =
+      event.type === "RECORD_MEASUREMENT"
+        ? {
+            type: KIND_TO_MEASURE[event.kind],
+            value: event.value,
+            phase,
+            loggedById: userId,
+            loggedAt: new Date(event.at),
+          }
+        : undefined;
+
+    const deviation = result.deviation
+      ? {
+          step: result.deviation.stepId,
+          phase: phaseToDayPhase(result.deviation.phase),
+          reason: result.deviation.reason,
+          authorId: userId,
+          forcedFromStatus: result.deviation.forcedFromStatus,
+          occurredAt: new Date(result.deviation.at),
+        }
+      : undefined;
+
+    await this.repo.applyEvent(batchId, {
+      phase,
+      state: serialize(newState),
+      revision,
+      finished,
+      measure,
+      deviation,
+    });
+
+    const batchStatus: BatchStatus = finished ? "EN_FERMENTATION" : session.batchStatus;
+    return {
+      batchStatus,
+      phase,
+      revision,
+      plan: newState.plan,
+      state: newState,
+      timings: stepTiming(newState, this.now()),
+      ...(result.deviation ? { deviation: result.deviation } : {}),
+    };
   }
 
   /** Reconstruit la vue depuis l'instantané persisté (validé par `dayStateSchema`). */
