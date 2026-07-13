@@ -11,10 +11,12 @@ import type {
   SessionRecord,
 } from "../src/modules/auth/repository.js";
 import type {
+  DayEventLogRecord,
   DayRepository,
   DaySessionCreateData,
   DaySessionRecord,
   DayStartContext,
+  DaySyncCommit,
   DayTransitionData,
   DeviationEffect,
   MeasureEffect,
@@ -67,6 +69,7 @@ class InMemoryAuthRepository implements AuthRepository {
 class InMemoryDayRepository implements DayRepository {
   private contexts = new Map<string, DayStartContext>();
   private sessions = new Map<string, DaySessionRecord>();
+  private eventLogs = new Map<string, DayEventLogRecord & { batchId: string }>();
   readonly measures: (MeasureEffect & { batchId: string })[] = [];
   readonly deviations: (DeviationEffect & { batchId: string })[] = [];
 
@@ -105,6 +108,39 @@ class InMemoryDayRepository implements DayRepository {
     });
     if (data.measure) this.measures.push({ batchId: id, ...data.measure });
     if (data.deviation) this.deviations.push({ batchId: id, ...data.deviation });
+    return Promise.resolve();
+  }
+  findEventLogs(id: string, ids: string[]): Promise<Map<string, DayEventLogRecord>> {
+    const found = new Map<string, DayEventLogRecord>();
+    for (const cid of ids) {
+      const log = this.eventLogs.get(cid);
+      if (log && log.batchId === id) found.set(cid, log);
+    }
+    return Promise.resolve(found);
+  }
+  commitSync(id: string, commit: DaySyncCommit): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`session ${id} absente (le service garantit son existence)`);
+    if (commit.changed) {
+      const batchStatus = commit.finished ? "EN_FERMENTATION" : session.batchStatus;
+      this.sessions.set(id, {
+        batchStatus,
+        phase: commit.phase,
+        state: commit.state,
+        revision: commit.revision,
+      });
+      for (const m of commit.measures) this.measures.push({ batchId: id, ...m });
+      for (const d of commit.deviations) this.deviations.push({ batchId: id, ...d });
+    }
+    for (const e of commit.eventLogs) {
+      this.eventLogs.set(e.clientEventId, {
+        batchId: id,
+        clientEventId: e.clientEventId,
+        rejected: e.rejected,
+        rejection: e.rejection,
+        resultRevision: e.resultRevision,
+      });
+    }
     return Promise.resolve();
   }
 }
@@ -463,6 +499,175 @@ describe("module batches — session Jour J : appliquer un événement (M4-05)",
       await start();
       expect((await force(1000, "caisse")).statusCode).toBe(403);
       expect((await inject(app, "POST", "/api/batches/b1/day/events")).statusCode).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module batches — session Jour J : rejeu de la file offline (M4-06)", () => {
+  let app: FastifyInstance;
+  let day: InMemoryDayRepository;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    day = new InMemoryDayRepository();
+    ({ app, cookieFor } = await makeApp(day));
+    day.seedBatch("b1", { status: "PLANIFIE", recipeSnapshot: RECIPE_SNAPSHOT, equipment: null });
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const start = (): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/batches/b1/day/start", { cookie: cookieFor("brasseur") });
+  const load = (): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "GET", "/api/batches/b1/day", { cookie: cookieFor("brasseur") });
+  const sync = (events: unknown, user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/batches/b1/day/events:sync", {
+      cookie: cookieFor(user),
+      payload: { events },
+    });
+
+  const forceEvt = (clientEventId: string, at: number): unknown => ({
+    clientEventId,
+    event: { type: "FORCE_STEP", at, author: "brasseur", reason: "démo" },
+  });
+
+  it("applique une file de 3 événements dans l'ordre (tri par at)", async () => {
+    try {
+      await start();
+      // Fournis dans le désordre ; le service rétablit l'ordre par `at`.
+      const res = await sync([
+        { clientEventId: "e2", event: { type: "VALIDATE_STEP", at: 2000 } },
+        { clientEventId: "e3", ...forceEvt("e3", 3000) },
+        { clientEventId: "e1", event: { type: "START_STEP", at: 1000 } },
+      ]);
+      expect(res.statusCode).toBe(200);
+      const outcomes = res.json().day.results.map((r: { outcome: string }) => r.outcome);
+      expect(outcomes).toEqual(["applied", "applied", "applied"]);
+      // init démarré+validé (→ mash-1) puis mash-1 forcé (→ lauter-1).
+      expect(res.json().day.state.cursor).toBe(2);
+      expect(res.json().day.revision).toBe(3);
+    } finally {
+      await close();
+    }
+  });
+
+  it("rejouer le même clientEventId n'a qu'un seul effet (idempotent)", async () => {
+    try {
+      await start();
+      const file = [forceEvt("e1", 1000)];
+      const first = await sync(file);
+      expect(first.json().day.results[0].outcome).toBe("applied");
+      expect(first.json().day.state.cursor).toBe(1);
+      expect(day.deviations).toHaveLength(1);
+
+      const second = await sync(file);
+      expect(second.json().day.results[0].outcome).toBe("skipped");
+      // Aucun double effet : curseur et écart inchangés.
+      expect(second.json().day.state.cursor).toBe(1);
+      expect(second.json().day.revision).toBe(1);
+      expect(day.deviations).toHaveLength(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it("un rejet en milieu de file n'interrompt pas les suivants", async () => {
+    try {
+      await start();
+      const res = await sync([
+        // VALIDATE sur init non démarré → rejeté par la machine.
+        { clientEventId: "e1", event: { type: "VALIDATE_STEP", at: 1000 } },
+        { clientEventId: "e2", event: { type: "START_STEP", at: 2000 } },
+        { clientEventId: "e3", event: { type: "VALIDATE_STEP", at: 3000 } },
+      ]);
+      expect(res.statusCode).toBe(200);
+      const results = res.json().day.results;
+      expect(results.map((r: { outcome: string }) => r.outcome)).toEqual([
+        "rejected",
+        "applied",
+        "applied",
+      ]);
+      expect(results[0].rejection).toBeTruthy();
+      // Seuls les 2 événements valides ont avancé (init démarré puis validé).
+      expect(res.json().day.state.cursor).toBe(1);
+      expect(res.json().day.revision).toBe(2);
+    } finally {
+      await close();
+    }
+  });
+
+  it("rejouer deux fois la même file laisse le batch dans le même état (démo offline)", async () => {
+    try {
+      await start();
+      const file = [
+        forceEvt("e1", 1000),
+        forceEvt("e2", 2000),
+        forceEvt("e3", 3000),
+        forceEvt("e4", 4000),
+        forceEvt("e5", 5000),
+        forceEvt("e6", 6000),
+      ];
+      const first = await sync(file);
+      expect(first.json().day.batchStatus).toBe("EN_FERMENTATION");
+      expect(first.json().day.phase).toBe("TERMINE");
+      const stateAfterFirst = (await load()).json().day.state;
+
+      // Rejeu intégral : tout est ignoré, l'état ne bouge pas.
+      const second = await sync(file);
+      expect(
+        second.json().day.results.every((r: { outcome: string }) => r.outcome === "skipped"),
+      ).toBe(true);
+      const stateAfterSecond = (await load()).json().day.state;
+      expect(stateAfterSecond).toEqual(stateAfterFirst);
+      expect(day.deviations).toHaveLength(6); // pas de doublon
+    } finally {
+      await close();
+    }
+  });
+
+  it("état final == application en ligne équivalente (M4-05)", async () => {
+    try {
+      await start();
+      const events = [
+        { clientEventId: "s1", event: { type: "START_STEP", at: 1000 } },
+        { clientEventId: "s2", event: { type: "VALIDATE_STEP", at: 2000 } },
+        { clientEventId: "s3", ...forceEvt("s3", 3000) },
+      ];
+      const synced = (await sync(events)).json().day;
+
+      // Rejeu en ligne équivalent sur un second batch.
+      day.seedBatch("b2", { status: "PLANIFIE", recipeSnapshot: RECIPE_SNAPSHOT, equipment: null });
+      await inject(app, "POST", "/api/batches/b2/day/start", { cookie: cookieFor("brasseur") });
+      const online = (u: unknown): ReturnType<FastifyInstance["inject"]> =>
+        inject(app, "POST", "/api/batches/b2/day/events", {
+          cookie: cookieFor("brasseur"),
+          payload: u,
+        });
+      await online({ type: "START_STEP", at: 1000 });
+      await online({ type: "VALIDATE_STEP", at: 2000 });
+      const last = (
+        await online({ type: "FORCE_STEP", at: 3000, author: "brasseur", reason: "démo" })
+      ).json().day;
+
+      expect(synced.state.cursor).toBe(last.state.cursor);
+      expect(synced.state.completedStepIds).toEqual(last.state.completedStepIds);
+      expect(synced.revision).toBe(last.revision);
+    } finally {
+      await close();
+    }
+  });
+
+  it("404 si aucune session ; RBAC : caisse refusée, anonyme refusé", async () => {
+    try {
+      // Pas de session ouverte encore → 404.
+      expect((await sync([forceEvt("e1", 1000)])).statusCode).toBe(404);
+
+      await start();
+      expect((await sync([forceEvt("e1", 1000)], "caisse")).statusCode).toBe(403);
+      expect((await inject(app, "POST", "/api/batches/b1/day/events:sync")).statusCode).toBe(401);
     } finally {
       await close();
     }

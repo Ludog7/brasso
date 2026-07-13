@@ -68,6 +68,41 @@ export interface DayTransitionData {
   deviation?: DeviationEffect;
 }
 
+/** Entrée déjà rejouée (`DayEventLog`) — sert de garde d'idempotence (M4-06). */
+export interface DayEventLogRecord {
+  clientEventId: string;
+  rejected: boolean;
+  rejection: string | null;
+  resultRevision: number;
+}
+
+/** Nouvelle ligne `DayEventLog` à écrire lors d'une synchro. */
+export interface DayEventLogEntry {
+  clientEventId: string;
+  type: string;
+  resultRevision: number;
+  rejected: boolean;
+  rejection: string | null;
+}
+
+/**
+ * Résultat consolidé d'une synchro (M4-06) à persister **atomiquement** : l'état
+ * final (si au moins un événement a été appliqué), les effets cumulés et les
+ * lignes d'idempotence de tous les nouveaux événements (appliqués **ou** rejetés).
+ */
+export interface DaySyncCommit {
+  /** `true` si au moins un événement a été appliqué (état/revision ont changé). */
+  changed: boolean;
+  phase: DayPhase;
+  state: Prisma.InputJsonValue;
+  revision: number;
+  /** `true` si le brassin vient d'être terminé par cette synchro. */
+  finished: boolean;
+  measures: MeasureEffect[];
+  deviations: DeviationEffect[];
+  eventLogs: DayEventLogEntry[];
+}
+
 export interface DayRepository {
   /** Contexte de démarrage d'un batch ; `null` si le batch n'existe pas. */
   getStartContext(batchId: string): Promise<DayStartContext | null>;
@@ -85,6 +120,10 @@ export interface DayRepository {
    * brassin (`EN_FERMENTATION`) si `finished`.
    */
   applyEvent(batchId: string, data: DayTransitionData): Promise<void>;
+  /** Événements de la file déjà appliqués (par `clientEventId`) — garde d'idempotence. */
+  findEventLogs(batchId: string, clientEventIds: string[]): Promise<Map<string, DayEventLogRecord>>;
+  /** Persiste le résultat d'une synchro (état + effets + journal) — **atomique**. */
+  commitSync(batchId: string, commit: DaySyncCommit): Promise<void>;
 }
 
 export class PrismaBatchDayRepository implements DayRepository {
@@ -175,6 +214,82 @@ export class PrismaBatchDayRepository implements DayRepository {
         await tx.batch.update({
           where: { id: batchId },
           data: { status: "EN_FERMENTATION", fermentedAt: new Date() },
+        });
+      }
+    });
+  }
+
+  async findEventLogs(
+    batchId: string,
+    clientEventIds: string[],
+  ): Promise<Map<string, DayEventLogRecord>> {
+    if (clientEventIds.length === 0) return new Map();
+    const rows = await this.prisma.dayEventLog.findMany({
+      where: { batchId, id: { in: clientEventIds } },
+      select: { id: true, rejected: true, rejection: true, resultRevision: true },
+    });
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        {
+          clientEventId: r.id,
+          rejected: r.rejected,
+          rejection: r.rejection,
+          resultRevision: r.resultRevision,
+        },
+      ]),
+    );
+  }
+
+  async commitSync(batchId: string, commit: DaySyncCommit): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      if (commit.changed) {
+        await tx.batchDayState.update({
+          where: { batchId },
+          data: { phase: commit.phase, state: commit.state, revision: commit.revision },
+        });
+        for (const m of commit.measures) {
+          await tx.batchMeasure.create({
+            data: {
+              batchId,
+              type: m.type,
+              value: m.value,
+              phase: m.phase,
+              loggedById: m.loggedById,
+              loggedAt: m.loggedAt,
+            },
+          });
+        }
+        for (const d of commit.deviations) {
+          await tx.deviationLog.create({
+            data: {
+              batchId,
+              step: d.step,
+              phase: d.phase,
+              reason: d.reason,
+              authorId: d.authorId,
+              forcedFromStatus: d.forcedFromStatus,
+              occurredAt: d.occurredAt,
+            },
+          });
+        }
+        if (commit.finished) {
+          await tx.batch.update({
+            where: { id: batchId },
+            data: { status: "EN_FERMENTATION", fermentedAt: new Date() },
+          });
+        }
+      }
+      if (commit.eventLogs.length > 0) {
+        await tx.dayEventLog.createMany({
+          data: commit.eventLogs.map((e) => ({
+            id: e.clientEventId,
+            batchId,
+            type: e.type,
+            resultRevision: e.resultRevision,
+            rejected: e.rejected,
+            rejection: e.rejection,
+          })),
         });
       }
     });

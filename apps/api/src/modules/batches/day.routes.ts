@@ -32,6 +32,15 @@ const dayEventBody = z.preprocess((value) => {
   return value;
 }, dayEventSchema);
 
+/**
+ * Corps de la synchro offline (M4-06) : une file d'événements, chacun identifié
+ * par un `clientEventId` (idempotence) et portant l'`at` **capté hors-ligne** (donc
+ * requis ici, pas d'horodatage serveur). L'ordre est rétabli côté service par `at`.
+ */
+const daySyncBody = z.object({
+  events: z.array(z.object({ clientEventId: z.string().min(1), event: dayEventSchema })),
+});
+
 export const batchDayRoutes: FastifyPluginAsync<BatchDayRoutesOptions> = async (app, opts) => {
   const repository = opts.dayRepository ?? new PrismaBatchDayRepository(prisma);
   const service = new BatchDayService(repository);
@@ -58,6 +67,16 @@ export const batchDayRoutes: FastifyPluginAsync<BatchDayRoutesOptions> = async (
       const { id } = idParams.parse(request.params);
       const event = dayEventBody.parse(request.body);
       return { day: await service.applyEvent(id, event, request.user?.id ?? null) };
+    },
+  );
+
+  app.post(
+    "/batches/:id/day/events:sync",
+    { config: app.rbac("recettes", "update") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      const { events } = daySyncBody.parse(request.body);
+      return { day: await service.sync(id, events, request.user?.id ?? null) };
     },
   );
 };
