@@ -108,6 +108,10 @@ enum MeasureType {
 }
 
 /// Phases de la state machine Jour J (§ spec fonctionnelle, détail core M1-13).
+/// Correspondance avec les `Phase` core (M4-01 `phaseToDayPhase`) :
+/// INITIALIZATION↔INITIALISATION, MASH↔EMPATAGE, LAUTER↔FILTRATION,
+/// BOIL↔EBULLITION, COOLING↔REFROIDISSEMENT, PITCHING↔ENSEMENCEMENT ; brassin
+/// terminé (curseur hors plan) ↔ TERMINE.
 enum DayPhase {
   INITIALISATION
   EMPATAGE
@@ -116,6 +120,15 @@ enum DayPhase {
   REFROIDISSEMENT
   ENSEMENCEMENT
   TERMINE
+}
+
+/// Type de correction densité/volume pré-ébullition proposée puis journalisée
+/// (M4-02/M4-07). Valeurs indicatives d'aide à la décision (ADR-11).
+enum CorrectionType {
+  EXTEND_BOIL
+  ADD_SUGAR
+  DILUTE
+  OTHER
 }
 
 /// Logique de stock d'un article de catalogue (§3.3).
@@ -263,6 +276,7 @@ model User {
   brewingBatches BatchBrewer[]
   measures       BatchMeasure[]
   deviationLogs  DeviationLog[]
+  correctionLogs BatchCorrectionLog[]
   stockMovements StockMovement[]
   inventories    StockReservation[]
   auditLogs      AuditLog[]
@@ -529,12 +543,14 @@ model Batch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  brewers       BatchBrewer[]
-  measures      BatchMeasure[]
-  deviationLogs DeviationLog[]
-  dayState      BatchDayState?
-  movements     StockMovement[]
-  reservations  StockReservation[]
+  brewers        BatchBrewer[]
+  measures       BatchMeasure[]
+  deviationLogs  DeviationLog[]
+  correctionLogs BatchCorrectionLog[]
+  dayEventLogs   DayEventLog[]
+  dayState       BatchDayState?
+  movements      StockMovement[]
+  reservations   StockReservation[]
 
   @@index([recipeId])
   @@index([status])
@@ -570,16 +586,23 @@ model BatchMeasure {
 }
 
 /// Journal d'écart de procédure (§3.2) : créé par « Forcer l'étape » en mode
-/// manuel. Append-only.
+/// manuel. Append-only. `phase`/`forcedFromStatus`/`occurredAt` proviennent de
+/// l'intention `DeviationLog` core (M1-13) ; nullables pour rétrocompat (M4-03).
 model DeviationLog {
-  id        String   @id @default(cuid())
-  batchId   String
-  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  step      String
-  reason    String
-  authorId  String?
-  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
+  id               String    @id @default(cuid())
+  batchId          String
+  batch            Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  step             String
+  /// Phase Jour J au moment du forçage (mapping core, M4-01 `phaseToDayPhase`).
+  phase            DayPhase?
+  /// Statut de l'étape (StepStatus core) au moment du forçage.
+  forcedFromStatus String?
+  reason           String
+  authorId         String?
+  author           User?     @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  /// Horodatage métier du forçage (`event.at`), distinct de `createdAt` (insertion).
+  occurredAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
 
   @@index([batchId])
 }
@@ -592,7 +615,45 @@ model BatchDayState {
   phase     DayPhase @default(INITIALISATION)
   /// Timers, horodatages et statut par étape (JSONB, forme définie par core).
   state     Json?
+  /// Compteur monotone incrémenté à chaque transition appliquée — détection de
+  /// rejeu périmé côté sync offline (M4-06).
+  revision  Int      @default(0)
   updatedAt DateTime @updatedAt
+}
+
+/// Journal des décisions de correction densité/volume pré-ébullition (§ spec
+/// « Journalisation des décisions ») — append-only. `payload` conserve la
+/// proposition retenue et les valeurs projetées (OG/ABV), calculées par core
+/// (M4-02). Indicateur d'aide à la décision (ADR-11), jamais une garantie.
+model BatchCorrectionLog {
+  id        String         @id @default(cuid())
+  batchId   String
+  batch     Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  stepId    String
+  type      CorrectionType
+  payload   Json
+  authorId  String?
+  author    User?          @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime       @default(now())
+
+  @@index([batchId])
+}
+
+/// Idempotence du rejeu de la file d'événements offline (ADR-08, M4-06). `id` =
+/// `clientEventId` fourni par le client : rejouer deux fois le même événement est
+/// un no-op. `resultRevision` = `BatchDayState.revision` après application ;
+/// `rejected`/`rejection` tracent un événement refusé par `transition`.
+model DayEventLog {
+  id             String   @id
+  batchId        String
+  batch          Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  type           String
+  appliedAt      DateTime @default(now())
+  resultRevision Int
+  rejected       Boolean  @default(false)
+  rejection      String?
+
+  @@index([batchId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
