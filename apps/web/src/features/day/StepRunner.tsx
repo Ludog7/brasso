@@ -1,28 +1,51 @@
 /**
- * Dérouleur d'étapes du Jour J (M4-09/10) — mode normal : **progression contrôlée**
+ * Dérouleur d'étapes du Jour J (M4-09/10/11) — mode normal : **progression contrôlée**
  * étape par étape (spec « State Machine tolérante »). Rend l'étape courante et
  * l'action contextuelle au `StepStatus` :
  * - `PENDING` → « Démarrer l'étape » (`START_STEP`) ;
  * - `AWAITING_STABILIZATION` → `StabilizationGate` (`CONFIRM_STABILIZATION`, M4-10) ;
  * - `TIMER_RUNNING` → `HoldTimer` (compte à rebours, « Valider » à l'écoulement) ;
- * - `AWAITING_VALIDATION` → « Valider l'étape » (`VALIDATE_STEP`).
+ * - `AWAITING_VALIDATION` → « Valider l'étape » (`VALIDATE_STEP`), **si** les mesures
+ *   requises sont saisies ; sinon on invite à les relever (`MeasurementEntry`, M4-11).
  *
- * Mesures (M4-11) et forçage (M4-12) sont hors périmètre. En fin de plan, écran de
- * clôture (batch `EN_FERMENTATION`) avec lien vers la fiche batch.
+ * Le forçage (M4-12) est hors périmètre. En fin de plan, écran de clôture (batch
+ * `EN_FERMENTATION`) avec lien vers la fiche batch.
  */
 
+import {
+  type DayState,
+  type MeasurementKind,
+  measurementsForStep,
+  type StepSpec,
+} from "@brasso/core";
 import { CheckCircle2, Loader2, Play } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { HoldTimer } from "@/features/day/HoldTimer";
 import { useDayEvent } from "@/features/day/hooks";
-import { DAY_PHASE_LABELS } from "@/features/day/labels";
+import { DAY_PHASE_LABELS, MEASUREMENT_LABELS } from "@/features/day/labels";
+import { MeasurementEntry } from "@/features/day/MeasurementEntry";
 import { PhaseProgress } from "@/features/day/PhaseProgress";
 import { StabilizationGate } from "@/features/day/StabilizationGate";
 import type { DaySession } from "@/lib/api";
 import { Button } from "@/ui/button";
 
-export function StepRunner({ day, batchId }: { day: DaySession; batchId: string }) {
+/** Mesures requises encore manquantes pour l'étape (miroir de la garde serveur M1-13). */
+function missingMeasurements(step: StepSpec, state: DayState): MeasurementKind[] {
+  const required = step.requiredMeasurements ?? [];
+  const present = new Set(measurementsForStep(state, step.id).map((m) => m.kind));
+  return required.filter((k) => !present.has(k));
+}
+
+export function StepRunner({
+  day,
+  batchId,
+  snapshot,
+}: {
+  day: DaySession;
+  batchId: string;
+  snapshot: unknown;
+}) {
   const event = useDayEvent(batchId);
   const { plan, cursor, status } = day.state;
 
@@ -31,6 +54,10 @@ export function StepRunner({ day, batchId }: { day: DaySession; batchId: string 
   }
 
   const step = plan[cursor];
+  const missing = step ? missingMeasurements(step, day.state) : [];
+  const hasMeasurements = (step?.requiredMeasurements?.length ?? 0) > 0;
+  const showMeasures =
+    step && hasMeasurements && (status === "TIMER_RUNNING" || status === "AWAITING_VALIDATION");
 
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-8 text-center">
@@ -85,21 +112,32 @@ export function StepRunner({ day, batchId }: { day: DaySession; batchId: string 
         ) : null}
 
         {status === "AWAITING_VALIDATION" ? (
-          <Button
-            size="lg"
-            className="w-full max-w-xs"
-            disabled={event.isPending}
-            onClick={() => event.mutate({ type: "VALIDATE_STEP" })}
-          >
-            {event.isPending ? (
-              <Loader2 className="size-5 animate-spin" aria-hidden="true" />
-            ) : (
-              <CheckCircle2 className="size-5" aria-hidden="true" />
-            )}
-            Valider l'étape
-          </Button>
+          missing.length === 0 ? (
+            <Button
+              size="lg"
+              className="w-full max-w-xs"
+              disabled={event.isPending}
+              onClick={() => event.mutate({ type: "VALIDATE_STEP" })}
+            >
+              {event.isPending ? (
+                <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="size-5" aria-hidden="true" />
+              )}
+              Valider l'étape
+            </Button>
+          ) : (
+            <p role="note" className="max-w-xs text-sm text-muted-foreground">
+              Mesures requises manquantes : {missing.map((k) => MEASUREMENT_LABELS[k]).join(", ")}.
+              Relève-les ci-dessous pour valider en mode normal.
+            </p>
+          )
         ) : null}
       </div>
+
+      {showMeasures && step ? (
+        <MeasurementEntry step={step} state={day.state} snapshot={snapshot} batchId={batchId} />
+      ) : null}
     </div>
   );
 }

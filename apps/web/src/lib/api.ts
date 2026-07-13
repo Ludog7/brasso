@@ -584,14 +584,23 @@ export interface DaySession {
   timings: StepTiming | null;
 }
 
+/** Type de mesure relevée pendant le brassage (miroir de `MeasurementKind` core). */
+export type DayMeasurementKind = "density" | "volume" | "temperature" | "ph";
+
 /**
- * Événement Jour J piloté depuis le dérouleur (M4-09/10). Le serveur horodate `at`
- * lui-même en ligne (ADR-08) : le client n'envoie que l'intention. Élargi par les
- * tickets suivants (mesures M4-11, forçage M4-12).
+ * Événement Jour J piloté depuis le dérouleur (M4-09/10/11). Le serveur horodate `at`
+ * lui-même en ligne (ADR-08) : le client n'envoie que l'intention. Élargi par le
+ * ticket forçage (M4-12).
  */
 export type DayEventRequest =
   | { type: "START_STEP" }
   | { type: "CONFIRM_STABILIZATION"; temperatureC?: number; source?: "manual" | "sensor" }
+  | {
+      type: "RECORD_MEASUREMENT";
+      kind: DayMeasurementKind;
+      value: number;
+      source?: "manual" | "sensor";
+    }
   | { type: "VALIDATE_STEP" };
 
 export const dayApi = {
