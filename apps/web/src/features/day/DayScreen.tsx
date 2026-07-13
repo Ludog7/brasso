@@ -3,9 +3,9 @@
  * sombre, cibles tactiles ≥ 48 px (design system), **zéro drag-and-drop**. Charge
  * plan + état via `GET /day` (M4-04) ; propose « Démarrer » si aucune session.
  *
- * Le **dérouleur interactif** (M4-09, `StepRunner`) pilote l'étape courante en
- * mode normal (Start/Valider câblés sur `POST /day/events`). Timers, mesures et
- * forçage arrivent aux tickets suivants.
+ * Le **dérouleur interactif** (`StepRunner`) pilote l'étape courante en mode normal
+ * (Start/Valider câblés sur `POST /day/events`, M4-09) avec **timers de palier après
+ * stabilisation** (M4-10). Mesures et forçage arrivent aux tickets suivants.
  */
 
 import { ArrowLeft, Loader2, Play, Wifi, WifiOff } from "lucide-react";

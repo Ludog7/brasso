@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { batchKeys } from "@/features/batches/hooks";
 import { useDayToasts } from "@/features/day/toast";
@@ -92,4 +92,20 @@ export function useOnlineStatus(): boolean {
     () => navigator.onLine,
     () => true,
   );
+}
+
+/**
+ * Horloge locale qui bat à intervalle (défaut 1 s) pour animer le compte à rebours
+ * du palier (M4-10). N'est **pas** l'autorité : `timer.startedAt` reste horodaté
+ * serveur (ADR-08) ; on ne fait que raffraîchir l'affichage de `stepTiming` côté
+ * client. Passer `active=false` (statut sans timer) coupe l'intervalle.
+ */
+export function useNow(active = true, intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [active, intervalMs]);
+  return now;
 }
