@@ -3,8 +3,9 @@
  * sombre, cibles tactiles ≥ 48 px (design system), **zéro drag-and-drop**. Charge
  * plan + état via `GET /day` (M4-04) ; propose « Démarrer » si aucune session.
  *
- * Le **dérouleur interactif** (Start/Valider, timers, mesures) arrive en M4-09+ :
- * ici l'état est affiché en lecture seule, avec l'indicateur de connexion.
+ * Le **dérouleur interactif** (M4-09, `StepRunner`) pilote l'étape courante en
+ * mode normal (Start/Valider câblés sur `POST /day/events`). Timers, mesures et
+ * forçage arrivent aux tickets suivants.
  */
 
 import { ArrowLeft, Loader2, Play, Wifi, WifiOff } from "lucide-react";
@@ -13,7 +14,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useBatch } from "@/features/batches/hooks";
 import { useDaySession, useOnlineStatus, useStartDay } from "@/features/day/hooks";
 import { DAY_PHASE_LABELS } from "@/features/day/labels";
-import type { DaySession } from "@/lib/api";
+import { StepRunner } from "@/features/day/StepRunner";
+import { DayToaster } from "@/features/day/toast";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 
@@ -96,7 +98,7 @@ export function DayScreen() {
 
       <main className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
         {day ? (
-          <SessionView day={day} />
+          <StepRunner day={day} batchId={id} />
         ) : (
           <StartPanel
             onStart={() => startDay.mutate()}
@@ -105,6 +107,8 @@ export function DayScreen() {
           />
         )}
       </main>
+
+      <DayToaster />
     </div>
   );
 }
@@ -138,55 +142,6 @@ function StartPanel({
           Impossible de démarrer la session. Vérifie la connexion et réessaie.
         </p>
       ) : null}
-    </div>
-  );
-}
-
-/** Session en cours : phase courante + progression du plan (lecture seule, M4-08). */
-function SessionView({ day }: { day: DaySession }) {
-  const { plan, cursor, completedStepIds } = day.state;
-  const finished = cursor >= plan.length;
-  const current = plan[cursor] ?? null;
-
-  return (
-    <div className="flex w-full max-w-md flex-col items-center gap-8 text-center">
-      <div className="flex flex-col items-center gap-2">
-        <span className="text-sm uppercase tracking-wide text-muted-foreground">
-          {finished ? "Brassin terminé" : `Étape ${cursor + 1} / ${plan.length}`}
-        </span>
-        <h2 className="text-4xl font-semibold">{DAY_PHASE_LABELS[day.phase]}</h2>
-        {current?.label ? <p className="text-lg text-muted-foreground">{current.label}</p> : null}
-      </div>
-
-      <ol className="flex w-full flex-col gap-2 text-left">
-        {plan.map((step, i) => {
-          const done = completedStepIds.includes(step.id);
-          const isCurrent = i === cursor && !finished;
-          return (
-            <li
-              key={step.id}
-              aria-current={isCurrent ? "step" : undefined}
-              className={[
-                "flex min-h-12 items-center gap-3 rounded-md border px-4",
-                isCurrent
-                  ? "border-primary bg-primary/10 font-medium text-foreground"
-                  : done
-                    ? "border-border text-muted-foreground"
-                    : "border-border/60 text-muted-foreground",
-              ].join(" ")}
-            >
-              <span
-                aria-hidden="true"
-                className={[
-                  "size-2.5 shrink-0 rounded-full",
-                  isCurrent ? "bg-primary" : done ? "bg-emerald-400" : "bg-muted-foreground/40",
-                ].join(" ")}
-              />
-              <span className="truncate">{step.label ?? step.id}</span>
-            </li>
-          );
-        })}
-      </ol>
     </div>
   );
 }
