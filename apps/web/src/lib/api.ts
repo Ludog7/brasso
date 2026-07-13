@@ -6,12 +6,16 @@
 import type {
   BjcpStyle,
   CatalogKind,
+  DayPhase,
+  DayPlan,
+  DayState,
   EquipmentProfileInput,
   IngredientCategory,
   IngredientUse,
   ProcessStepType,
   RecipeIngredientInput,
   RecipeStepInput,
+  StepTiming,
   StockUnit,
 } from "@brasso/core";
 
@@ -560,4 +564,34 @@ export const batchesApi = {
       method: "POST",
       body: JSON.stringify({ status }),
     }).then((r) => r.batch),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session Jour J (M4-04/05/06 api / M4-08+ web). Le serveur est source de vérité
+// (ADR-08) : plan dérivé du snapshot, état sérialisable, timings dérivés à `now`.
+// Types réutilisés de `@brasso/core` (mêmes structures que la state machine).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Vue d'une session Jour J (miroir de `DaySessionView` côté API). */
+export interface DaySession {
+  batchStatus: BatchStatus;
+  /** Phase courante côté persistance (Prisma `DayPhase`). */
+  phase: DayPhase;
+  revision: number;
+  plan: DayPlan;
+  state: DayState;
+  /** Chronométrage de l'étape courante à l'instant serveur (ou `null` si terminé). */
+  timings: StepTiming | null;
+}
+
+export const dayApi = {
+  /** Charge la session Jour J. Rejette en 404 `NOT_FOUND` s'il n'y en a pas encore. */
+  get: (batchId: string): Promise<DaySession> =>
+    request<{ day: DaySession }>(`/api/batches/${batchId}/day`).then((r) => r.day),
+
+  /** Démarre le Jour J (idempotent) : initialise l'état et passe le batch EN_BRASSAGE. */
+  start: (batchId: string): Promise<DaySession> =>
+    request<{ day: DaySession }>(`/api/batches/${batchId}/day/start`, { method: "POST" }).then(
+      (r) => r.day,
+    ),
 };

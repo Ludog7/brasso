@@ -2,6 +2,7 @@ import { Loader2 } from "lucide-react";
 import { type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { DayScreen } from "@/features/day/DayScreen";
 import { useBootstrapSession } from "@/hooks/useAuth";
 import { BatchDetailPage } from "@/routes/batches/BatchDetailPage";
 import { PlanBatchPage } from "@/routes/batches/PlanBatchPage";
@@ -62,6 +63,7 @@ export function App() {
         <Route path="/equipment/:id/edit" element={<EditEquipmentPage />} />
         <Route path="/batches/new/:recipeId" element={<PlanBatchPage />} />
         <Route path="/batches/:id" element={<BatchDetailPage />} />
+        <Route path="/batches/:id/day" element={<DayScreen />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
