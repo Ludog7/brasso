@@ -1,10 +1,11 @@
 /**
- * Routes de la **session Jour J** (M4-04) : démarrer et charger le déroulé d'un
- * brassage sur tablette. RBAC sur la ressource `recettes` (domaine brassage,
- * matrice §3.5 figée ADR-10) — `start` = `update` (mutation), `get` = `read`.
- * Les transitions (M4-05) et le rejeu offline (M4-06) sont d'autres tickets.
+ * Routes de la **session Jour J** (M4-04/M4-05) : démarrer, charger et **piloter**
+ * le déroulé d'un brassage sur tablette. RBAC sur la ressource `recettes`
+ * (domaine brassage, matrice §3.5 figée ADR-10) — mutations = `update`,
+ * lecture = `read`. Le rejeu d'une file offline (M4-06) est un autre ticket.
  */
 
+import { dayEventSchema } from "@brasso/core";
 import { prisma } from "@brasso/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
@@ -18,6 +19,18 @@ export interface BatchDayRoutesOptions {
 }
 
 const idParams = z.object({ id: z.string().min(1) });
+
+/**
+ * Corps d'un événement Jour J. En mode **en ligne**, l'`at` est optionnel : le
+ * serveur l'horodate (`Date.now()`) s'il est absent ; en mode **file** (M4-06),
+ * l'appelant fournit l'`at` capté hors-ligne. Validé ensuite par `dayEventSchema`.
+ */
+const dayEventBody = z.preprocess((value) => {
+  if (value !== null && typeof value === "object" && (value as { at?: unknown }).at === undefined) {
+    return { ...(value as object), at: Date.now() };
+  }
+  return value;
+}, dayEventSchema);
 
 export const batchDayRoutes: FastifyPluginAsync<BatchDayRoutesOptions> = async (app, opts) => {
   const repository = opts.dayRepository ?? new PrismaBatchDayRepository(prisma);
@@ -37,4 +50,14 @@ export const batchDayRoutes: FastifyPluginAsync<BatchDayRoutesOptions> = async (
     const { id } = idParams.parse(request.params);
     return { day: await service.get(id) };
   });
+
+  app.post(
+    "/batches/:id/day/events",
+    { config: app.rbac("recettes", "update") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      const event = dayEventBody.parse(request.body);
+      return { day: await service.applyEvent(id, event, request.user?.id ?? null) };
+    },
+  );
 };

@@ -15,6 +15,9 @@ import type {
   DaySessionCreateData,
   DaySessionRecord,
   DayStartContext,
+  DayTransitionData,
+  DeviationEffect,
+  MeasureEffect,
 } from "../src/modules/batches/day.repository.js";
 import { SESSION_COOKIE } from "../src/plugins/auth.js";
 
@@ -57,10 +60,15 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 }
 
-/** Repo Jour J en mémoire : `start` reflète l'atomicité DB (session + statut batch). */
+/**
+ * Repo Jour J en mémoire : `start`/`applyEvent` reflètent l'atomicité DB (session
+ * + statut batch + effets). Les effets sont collectés pour les assertions.
+ */
 class InMemoryDayRepository implements DayRepository {
   private contexts = new Map<string, DayStartContext>();
   private sessions = new Map<string, DaySessionRecord>();
+  readonly measures: (MeasureEffect & { batchId: string })[] = [];
+  readonly deviations: (DeviationEffect & { batchId: string })[] = [];
 
   /** Amorce un batch démarrable (statut + snapshot + profil éventuel). */
   seedBatch(id: string, ctx: DayStartContext): void {
@@ -83,6 +91,20 @@ class InMemoryDayRepository implements DayRepository {
       state: data.state,
       revision: data.revision,
     });
+    return Promise.resolve();
+  }
+  applyEvent(id: string, data: DayTransitionData): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`session ${id} absente (le service garantit son existence)`);
+    const batchStatus = data.finished ? "EN_FERMENTATION" : session.batchStatus;
+    this.sessions.set(id, {
+      batchStatus,
+      phase: data.phase,
+      state: data.state,
+      revision: data.revision,
+    });
+    if (data.measure) this.measures.push({ batchId: id, ...data.measure });
+    if (data.deviation) this.deviations.push({ batchId: id, ...data.deviation });
     return Promise.resolve();
   }
 }
@@ -128,17 +150,19 @@ async function makeApp(
 
 interface InjectOptions {
   cookie?: string;
+  payload?: unknown;
 }
 function inject(
   app: FastifyInstance,
   method: "GET" | "POST",
   url: string,
-  { cookie }: InjectOptions = {},
+  { cookie, payload }: InjectOptions = {},
 ): ReturnType<FastifyInstance["inject"]> {
   return app.inject({
     method,
     url,
     ...(cookie ? { cookies: { [SESSION_COOKIE]: cookie } } : {}),
+    ...(payload !== undefined ? { payload } : {}),
   });
 }
 
@@ -277,6 +301,168 @@ describe("module batches — session Jour J : démarrer & charger (M4-04)", () =
       expect((await start("b1", "caisse")).statusCode).toBe(403);
       expect((await inject(app, "GET", "/api/batches/b1/day")).statusCode).toBe(401);
       expect((await inject(app, "POST", "/api/batches/b1/day/start")).statusCode).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module batches — session Jour J : appliquer un événement (M4-05)", () => {
+  let app: FastifyInstance;
+  let day: InMemoryDayRepository;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    day = new InMemoryDayRepository();
+    ({ app, cookieFor } = await makeApp(day));
+    day.seedBatch("b1", { status: "PLANIFIE", recipeSnapshot: RECIPE_SNAPSHOT, equipment: null });
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const start = (): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/batches/b1/day/start", { cookie: cookieFor("brasseur") });
+  const load = (user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "GET", "/api/batches/b1/day", { cookie: cookieFor(user) });
+  const event = (payload: unknown, user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/batches/b1/day/events", { cookie: cookieFor(user), payload });
+
+  /** Fait avancer l'étape courante en la forçant (motif obligatoire). */
+  const force = (at: number, user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    event({ type: "FORCE_STEP", at, author: "brasseur", reason: "démo déroulé" }, user);
+
+  it("START_STEP puis CONFIRM_STABILIZATION arment le timer de palier", async () => {
+    try {
+      await start();
+      // init (jalon) : démarrer puis valider pour atteindre mash-1.
+      await event({ type: "START_STEP", at: 1000 });
+      await event({ type: "VALIDATE_STEP", at: 1000 });
+
+      // mash-1 exige une stabilisation : START ne doit PAS armer le timer.
+      const started = await event({ type: "START_STEP", at: 2000 });
+      expect(started.statusCode).toBe(200);
+      expect(started.json().day.state.status).toBe("AWAITING_STABILIZATION");
+      expect(started.json().day.state.timer).toBeNull();
+
+      // La stabilisation confirmée arme (enfin) le timer (feature sanctuarisée).
+      const stabilized = await event({ type: "CONFIRM_STABILIZATION", at: 3000, temperatureC: 66 });
+      expect(stabilized.json().day.state.status).toBe("TIMER_RUNNING");
+      expect(stabilized.json().day.state.timer.stepId).toBe("mash-1");
+      expect(stabilized.json().day.revision).toBe(4); // start=0 puis 4 événements
+    } finally {
+      await close();
+    }
+  });
+
+  it("RECORD_MEASUREMENT insère un BatchMeasure (mapping density→GRAVITY, phase courante)", async () => {
+    try {
+      await start();
+      await event({ type: "START_STEP", at: 1000 });
+      await event({ type: "VALIDATE_STEP", at: 1000 }); // → mash-1 (EMPATAGE)
+
+      const res = await event({
+        type: "RECORD_MEASUREMENT",
+        at: 2000,
+        kind: "density",
+        value: 1.048,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(day.measures).toHaveLength(1);
+      expect(day.measures[0]).toMatchObject({
+        type: "GRAVITY",
+        value: 1.048,
+        phase: "EMPATAGE",
+        loggedById: "brasseur",
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it("VALIDATE_STEP avance le curseur", async () => {
+    try {
+      await start();
+      await event({ type: "START_STEP", at: 1000 });
+      const res = await event({ type: "VALIDATE_STEP", at: 1000 });
+      expect(res.json().day.state.cursor).toBe(1);
+      expect(res.json().day.state.completedStepIds).toEqual(["init"]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("FORCE_STEP insère un DeviationLog et avance", async () => {
+    try {
+      await start();
+      const res = await force(1000);
+      expect(res.statusCode).toBe(200);
+      expect(res.json().day.state.cursor).toBe(1);
+      expect(res.json().day.deviation).toMatchObject({ stepId: "init", reason: "démo déroulé" });
+      expect(day.deviations).toHaveLength(1);
+      expect(day.deviations[0]).toMatchObject({
+        step: "init",
+        phase: "INITIALISATION",
+        reason: "démo déroulé",
+        authorId: "brasseur",
+        forcedFromStatus: "PENDING",
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it("événement illégal → 409, état inchangé", async () => {
+    try {
+      await start();
+      // VALIDATE_STEP sur une étape non démarrée est refusé par la machine.
+      const res = await event({ type: "VALIDATE_STEP", at: 1000 });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.code).toBe("DAY_EVENT_REJECTED");
+
+      // L'état persisté n'a pas bougé (revision 0, curseur 0).
+      const after = await load();
+      expect(after.json().day.revision).toBe(0);
+      expect(after.json().day.state.cursor).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it("dérouler jusqu'à l'ensemencement clôt le brassin en EN_FERMENTATION (TERMINE)", async () => {
+    try {
+      await start();
+      // 6 étapes (init → … → pitching-1) forcées : la dernière clôt le Jour J.
+      let last;
+      for (let i = 1; i <= 6; i++) last = await force(i * 1000);
+      expect(last?.statusCode).toBe(200);
+      expect(last?.json().day.batchStatus).toBe("EN_FERMENTATION");
+      expect(last?.json().day.phase).toBe("TERMINE");
+      expect(last?.json().day.state.status).toBe("COMPLETED");
+
+      // Un événement de plus est refusé (brassin terminé).
+      expect((await force(7000)).statusCode).toBe(409);
+    } finally {
+      await close();
+    }
+  });
+
+  it("mode en ligne : `at` absent → horodaté par le serveur", async () => {
+    try {
+      await start();
+      const res = await event({ type: "START_STEP" }); // sans `at`
+      expect(res.statusCode).toBe(200);
+      expect(res.json().day.state.status).toBe("AWAITING_VALIDATION"); // init démarré
+    } finally {
+      await close();
+    }
+  });
+
+  it("RBAC : caisse ne peut pas émettre d'événement ; anonyme refusé", async () => {
+    try {
+      await start();
+      expect((await force(1000, "caisse")).statusCode).toBe(403);
+      expect((await inject(app, "POST", "/api/batches/b1/day/events")).statusCode).toBe(401);
     } finally {
       await close();
     }
