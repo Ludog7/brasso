@@ -8,7 +8,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 
 import { batchKeys } from "@/features/batches/hooks";
-import { ApiError, dayApi, type DaySession } from "@/lib/api";
+import { useDayToasts } from "@/features/day/toast";
+import { ApiError, dayApi, type DayEventRequest, type DaySession } from "@/lib/api";
 
 /** Fabrique de clés de cache Jour J. */
 export const dayKeys = {
@@ -45,6 +46,32 @@ export function useStartDay(batchId: string) {
     onSuccess: (session) => {
       qc.setQueryData(dayKeys.session(batchId), session);
       void qc.invalidateQueries({ queryKey: batchKeys.detail(batchId) });
+    },
+  });
+}
+
+/**
+ * Envoie un événement au dérouleur (`POST /day/events`, M4-05). En succès, la
+ * session renvoyée (source de vérité, ADR-08) remplace le cache `['day', batchId]`
+ * puis est invalidée ; à la clôture (`EN_FERMENTATION`) le détail du batch est
+ * rafraîchi. Un **refus** de la machine (409) déclenche un **toast** sans toucher
+ * à l'état local — l'écran reste sur l'étape courante.
+ */
+export function useDayEvent(batchId: string) {
+  const qc = useQueryClient();
+  const pushToast = useDayToasts((s) => s.push);
+  return useMutation({
+    mutationFn: (event: DayEventRequest) => dayApi.postEvent(batchId, event),
+    onSuccess: (session) => {
+      qc.setQueryData(dayKeys.session(batchId), session);
+      void qc.invalidateQueries({ queryKey: dayKeys.session(batchId) });
+      if (session.batchStatus === "EN_FERMENTATION") {
+        void qc.invalidateQueries({ queryKey: batchKeys.detail(batchId) });
+      }
+    },
+    onError: (error) => {
+      const rejected = error instanceof ApiError && error.status === 409;
+      pushToast(rejected ? error.message : "Action impossible. Vérifie la connexion et réessaie.");
     },
   });
 }

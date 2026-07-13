@@ -584,6 +584,13 @@ export interface DaySession {
   timings: StepTiming | null;
 }
 
+/**
+ * Événement Jour J piloté depuis le dérouleur (M4-09). Le serveur horodate `at`
+ * lui-même en ligne (ADR-08) : le client n'envoie que l'intention. Élargi par les
+ * tickets suivants (stabilisation M4-10, mesures M4-11, forçage M4-12).
+ */
+export type DayEventRequest = { type: "START_STEP" } | { type: "VALIDATE_STEP" };
+
 export const dayApi = {
   /** Charge la session Jour J. Rejette en 404 `NOT_FOUND` s'il n'y en a pas encore. */
   get: (batchId: string): Promise<DaySession> =>
@@ -594,4 +601,14 @@ export const dayApi = {
     request<{ day: DaySession }>(`/api/batches/${batchId}/day/start`, { method: "POST" }).then(
       (r) => r.day,
     ),
+
+  /**
+   * Applique un événement à la session (M4-05). Renvoie la session à jour ; un refus
+   * de la machine remonte en `ApiError` 409 `DAY_EVENT_REJECTED` (état serveur inchangé).
+   */
+  postEvent: (batchId: string, event: DayEventRequest): Promise<DaySession> =>
+    request<{ day: DaySession }>(`/api/batches/${batchId}/day/events`, {
+      method: "POST",
+      body: JSON.stringify(event),
+    }).then((r) => r.day),
 };
