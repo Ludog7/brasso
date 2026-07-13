@@ -7,6 +7,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AppConfig } from "./config.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { authRoutes } from "./modules/auth/routes.js";
+import type { DayRepository } from "./modules/batches/day.repository.js";
+import { batchDayRoutes } from "./modules/batches/day.routes.js";
 import type { BatchRepository } from "./modules/batches/repository.js";
 import { batchesRoutes } from "./modules/batches/routes.js";
 import type { EquipmentRepository } from "./modules/equipment/repository.js";
@@ -32,6 +34,8 @@ export interface BuildAppOptions {
   equipmentRepository?: EquipmentRepository;
   /** Repository de batchs injecté (tests) ; sinon adossé à Prisma. */
   batchRepository?: BatchRepository;
+  /** Repository de session Jour J injecté (tests) ; sinon adossé à Prisma. */
+  dayRepository?: DayRepository;
   /** Repository de catalogue injecté (tests) ; sinon adossé à Prisma. */
   catalogRepository?: CatalogRepository;
 }
@@ -68,6 +72,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     repository: opts.batchRepository,
     recipeRepository: opts.recipeRepository,
   });
+  await app.register(batchDayRoutes, { prefix: "/api", dayRepository: opts.dayRepository });
   await app.register(referentialsRoutes, {
     prefix: "/api",
     catalogRepository: opts.catalogRepository,
