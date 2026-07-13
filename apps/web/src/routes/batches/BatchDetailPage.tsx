@@ -106,6 +106,11 @@ export function BatchDetailPage() {
           <h1 className="text-lg font-semibold">Batch nº {data.batchNumber}</h1>
           <Badge tone={STATUS_TONE[data.status]}>{STATUS_LABELS[data.status]}</Badge>
         </div>
+        {data.status === "PLANIFIE" || data.status === "EN_BRASSAGE" ? (
+          <Button asChild className="ml-auto">
+            <Link to={`/batches/${data.id}/day`}>Piloter le Jour J</Link>
+          </Button>
+        ) : null}
       </header>
 
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
