@@ -1,6 +1,8 @@
 # Brasso — mémoire projet
 
 > Plateforme de gestion de microbrasserie associative. Ce fichier pilote **toutes** les sessions Claude Code sur ce repo. Lis-le en entier avant d'agir.
+>
+> **Reprise de dev → lis `docs/DEV.md`** (manuel du développeur : carte du repo, commandes, pipeline CI, pièges, ancrages d'architecture). Ce fichier-ci porte les **règles** ; `DEV.md` porte le **comment build/teste/navigue**.
 
 ## Règles non négociables
 
@@ -31,6 +33,7 @@ Node 22 LTS · pnpm workspaces + turborepo · Fastify 5 + Zod · Prisma 6 + Post
 
 ## Où trouver quoi
 
+- **Reprise / build / test / carte du repo : `docs/DEV.md`** (à lire en début de session)
 - Cadrage & ADR & milestones : `docs/SPEC-ORCHESTRATION.md`
 - Formules `core` + valeurs de validation : `docs/FORMULES-BRASSICOLES.md`
 - Spec fonctionnelle métier : `docs/SPEC-FONCTIONNELLE.md`
