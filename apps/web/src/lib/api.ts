@@ -585,11 +585,14 @@ export interface DaySession {
 }
 
 /**
- * Événement Jour J piloté depuis le dérouleur (M4-09). Le serveur horodate `at`
+ * Événement Jour J piloté depuis le dérouleur (M4-09/10). Le serveur horodate `at`
  * lui-même en ligne (ADR-08) : le client n'envoie que l'intention. Élargi par les
- * tickets suivants (stabilisation M4-10, mesures M4-11, forçage M4-12).
+ * tickets suivants (mesures M4-11, forçage M4-12).
  */
-export type DayEventRequest = { type: "START_STEP" } | { type: "VALIDATE_STEP" };
+export type DayEventRequest =
+  | { type: "START_STEP" }
+  | { type: "CONFIRM_STABILIZATION"; temperatureC?: number; source?: "manual" | "sensor" }
+  | { type: "VALIDATE_STEP" };
 
 export const dayApi = {
   /** Charge la session Jour J. Rejette en 404 `NOT_FOUND` s'il n'y en a pas encore. */

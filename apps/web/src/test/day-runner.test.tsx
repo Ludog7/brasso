@@ -253,16 +253,4 @@ describe("dérouleur d'étapes Jour J (M4-09)", () => {
     const link = screen.getByRole("link", { name: /voir le détail du batch/i });
     expect(link).toHaveAttribute("href", "/batches/b1");
   });
-
-  it("statut intermédiaire : action désactivée + indication", async () => {
-    scenario = {
-      day: dayView({ phase: "EMPATAGE", cursor: 1, status: "AWAITING_STABILIZATION" }),
-      onEvent: () => json(200, { day: scenario.day }),
-    };
-    installFetch();
-    renderApp();
-
-    expect(await screen.findByRole("button", { name: /valider l'étape/i })).toBeDisabled();
-    expect(screen.getByText(/stabilisation de température/i)).toBeInTheDocument();
-  });
 });

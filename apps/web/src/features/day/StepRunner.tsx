@@ -1,47 +1,26 @@
 /**
- * Dérouleur d'étapes du Jour J (M4-09) — mode normal : **progression contrôlée**
+ * Dérouleur d'étapes du Jour J (M4-09/10) — mode normal : **progression contrôlée**
  * étape par étape (spec « State Machine tolérante »). Rend l'étape courante et
- * propose l'action contextuelle au `StepStatus` : `PENDING` → « Démarrer »
- * (`START_STEP`), `AWAITING_VALIDATION` → « Valider l'étape » (`VALIDATE_STEP`).
- * Stabilisation/timers (M4-10), mesures (M4-11) et forçage (M4-12) sont hors
- * périmètre : leurs statuts intermédiaires désactivent l'action. En fin de plan,
- * écran de clôture (batch `EN_FERMENTATION`) avec lien vers la fiche batch.
+ * l'action contextuelle au `StepStatus` :
+ * - `PENDING` → « Démarrer l'étape » (`START_STEP`) ;
+ * - `AWAITING_STABILIZATION` → `StabilizationGate` (`CONFIRM_STABILIZATION`, M4-10) ;
+ * - `TIMER_RUNNING` → `HoldTimer` (compte à rebours, « Valider » à l'écoulement) ;
+ * - `AWAITING_VALIDATION` → « Valider l'étape » (`VALIDATE_STEP`).
+ *
+ * Mesures (M4-11) et forçage (M4-12) sont hors périmètre. En fin de plan, écran de
+ * clôture (batch `EN_FERMENTATION`) avec lien vers la fiche batch.
  */
 
-import type { StepStatus } from "@brasso/core";
-import { Check, CheckCircle2, Loader2, type LucideIcon, Play } from "lucide-react";
+import { CheckCircle2, Loader2, Play } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { HoldTimer } from "@/features/day/HoldTimer";
 import { useDayEvent } from "@/features/day/hooks";
 import { DAY_PHASE_LABELS } from "@/features/day/labels";
 import { PhaseProgress } from "@/features/day/PhaseProgress";
-import type { DayEventRequest, DaySession } from "@/lib/api";
+import { StabilizationGate } from "@/features/day/StabilizationGate";
+import type { DaySession } from "@/lib/api";
 import { Button } from "@/ui/button";
-
-/** Action primaire câblée sur un statut « actionnable » (sinon `null` → désactivée). */
-interface StepAction {
-  label: string;
-  event: DayEventRequest;
-  icon: LucideIcon;
-}
-
-/** Boutons contextuels (spec) : seuls `PENDING` et `AWAITING_VALIDATION` agissent. */
-function actionFor(status: StepStatus): StepAction | null {
-  switch (status) {
-    case "PENDING":
-      return { label: "Démarrer l'étape", event: { type: "START_STEP" }, icon: Play };
-    case "AWAITING_VALIDATION":
-      return { label: "Valider l'étape", event: { type: "VALIDATE_STEP" }, icon: Check };
-    default:
-      return null;
-  }
-}
-
-/** Pourquoi l'action est indisponible dans un statut intermédiaire (hors périmètre M4-09). */
-const STATUS_HINTS: Partial<Record<StepStatus, string>> = {
-  AWAITING_STABILIZATION: "En attente de confirmation de la stabilisation de température.",
-  TIMER_RUNNING: "Palier en cours : le timer doit s'écouler avant de valider.",
-};
 
 export function StepRunner({ day, batchId }: { day: DaySession; batchId: string }) {
   const event = useDayEvent(batchId);
@@ -52,8 +31,6 @@ export function StepRunner({ day, batchId }: { day: DaySession; batchId: string 
   }
 
   const step = plan[cursor];
-  const action = actionFor(status);
-  const ActionIcon = action?.icon;
 
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-8 text-center">
@@ -68,31 +45,60 @@ export function StepRunner({ day, batchId }: { day: DaySession; batchId: string 
       </div>
 
       <div className="flex w-full flex-col items-center gap-3">
-        {action && ActionIcon ? (
+        {status === "PENDING" ? (
           <Button
             size="lg"
             className="w-full max-w-xs"
             disabled={event.isPending}
-            onClick={() => event.mutate(action.event)}
+            onClick={() => event.mutate({ type: "START_STEP" })}
           >
             {event.isPending ? (
               <Loader2 className="size-5 animate-spin" aria-hidden="true" />
             ) : (
-              <ActionIcon className="size-5" aria-hidden="true" />
+              <Play className="size-5" aria-hidden="true" />
             )}
-            {action.label}
+            Démarrer l'étape
           </Button>
-        ) : (
-          <>
-            <Button size="lg" className="w-full max-w-xs" disabled>
-              <Check className="size-5" aria-hidden="true" />
-              Valider l'étape
-            </Button>
-            {STATUS_HINTS[status] ? (
-              <p className="text-sm text-muted-foreground">{STATUS_HINTS[status]}</p>
-            ) : null}
-          </>
-        )}
+        ) : null}
+
+        {status === "AWAITING_STABILIZATION" && step ? (
+          <StabilizationGate
+            step={step}
+            timing={day.timings}
+            pending={event.isPending}
+            onConfirm={(temperatureC) =>
+              event.mutate(
+                temperatureC === undefined
+                  ? { type: "CONFIRM_STABILIZATION" }
+                  : { type: "CONFIRM_STABILIZATION", temperatureC },
+              )
+            }
+          />
+        ) : null}
+
+        {status === "TIMER_RUNNING" ? (
+          <HoldTimer
+            state={day.state}
+            pending={event.isPending}
+            onValidate={() => event.mutate({ type: "VALIDATE_STEP" })}
+          />
+        ) : null}
+
+        {status === "AWAITING_VALIDATION" ? (
+          <Button
+            size="lg"
+            className="w-full max-w-xs"
+            disabled={event.isPending}
+            onClick={() => event.mutate({ type: "VALIDATE_STEP" })}
+          >
+            {event.isPending ? (
+              <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 className="size-5" aria-hidden="true" />
+            )}
+            Valider l'étape
+          </Button>
+        ) : null}
       </div>
     </div>
   );
