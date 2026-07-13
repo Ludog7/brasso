@@ -31,7 +31,13 @@ import {
 } from "@brasso/core";
 import type { Prisma } from "@brasso/db";
 
-import type { DayRepository, DaySessionRecord } from "./day.repository.js";
+import type {
+  DayEventLogEntry,
+  DayRepository,
+  DaySessionRecord,
+  DeviationEffect,
+  MeasureEffect,
+} from "./day.repository.js";
 import { BatchNotFoundError } from "./service.js";
 
 /** Démarrage refusé : le batch n'est pas dans un statut compatible → 409. */
@@ -94,6 +100,24 @@ export interface DayStartResult {
 export interface DayEventView extends DaySessionView {
   /** Intention de log d'écart produite par `FORCE_STEP` (persistée). */
   deviation?: DeviationLog;
+}
+
+/** Un événement de la file offline : identifiant client (idempotence) + événement. */
+export interface SyncEventInput {
+  clientEventId: string;
+  event: DayEvent;
+}
+
+/** Sort d'un événement rejoué : appliqué, ignoré (déjà vu), ou refusé par la machine. */
+export interface SyncEventResult {
+  clientEventId: string;
+  outcome: "applied" | "skipped" | "rejected";
+  rejection?: string;
+}
+
+/** Vue après synchro d'une file : la session résultante + le sort de chaque événement. */
+export interface DaySyncView extends DaySessionView {
+  results: SyncEventResult[];
 }
 
 export class BatchDayService {
@@ -171,35 +195,13 @@ export class BatchDayService {
     const phase = phaseToDayPhase(currentStep(newState)?.phase ?? null);
     const revision = session.revision + 1;
 
-    const measure =
-      event.type === "RECORD_MEASUREMENT"
-        ? {
-            type: KIND_TO_MEASURE[event.kind],
-            value: event.value,
-            phase,
-            loggedById: userId,
-            loggedAt: new Date(event.at),
-          }
-        : undefined;
-
-    const deviation = result.deviation
-      ? {
-          step: result.deviation.stepId,
-          phase: phaseToDayPhase(result.deviation.phase),
-          reason: result.deviation.reason,
-          authorId: userId,
-          forcedFromStatus: result.deviation.forcedFromStatus,
-          occurredAt: new Date(result.deviation.at),
-        }
-      : undefined;
-
     await this.repo.applyEvent(batchId, {
       phase,
       state: serialize(newState),
       revision,
       finished,
-      measure,
-      deviation,
+      measure: measureEffect(event, phase, userId),
+      deviation: deviationEffect(result.deviation, userId),
     });
 
     const batchStatus: BatchStatus = finished ? "EN_FERMENTATION" : session.batchStatus;
@@ -211,6 +213,109 @@ export class BatchDayService {
       state: newState,
       timings: stepTiming(newState, this.now()),
       ...(result.deviation ? { deviation: result.deviation } : {}),
+    };
+  }
+
+  /**
+   * Rejoue une **file d'événements offline** (M4-06, critère de démo « wifi coupé
+   * sans perte »). Les événements sont appliqués **dans l'ordre** (tri par `at`) et
+   * de façon **idempotente** : un `clientEventId` déjà journalisé est ignoré (aucune
+   * ré-application). Un rejet en milieu de file **n'interrompt pas** les suivants.
+   * L'état final est persisté une fois, en transaction (ADR-08).
+   */
+  async sync(
+    batchId: string,
+    events: readonly SyncEventInput[],
+    userId: string | null,
+  ): Promise<DaySyncView> {
+    const session = await this.repo.getSession(batchId);
+    if (!session) {
+      throw new DaySessionNotFoundError(batchId);
+    }
+
+    // Ordre déterministe par horodatage capté hors-ligne (déterminisme M1-13).
+    const ordered = [...events].sort((a, b) => a.event.at - b.event.at);
+    const known = await this.repo.findEventLogs(
+      batchId,
+      ordered.map((e) => e.clientEventId),
+    );
+
+    let state = dayStateSchema.parse(session.state) as DayState;
+    let revision = session.revision;
+    let changed = false;
+    const measures: MeasureEffect[] = [];
+    const deviations: DeviationEffect[] = [];
+    const eventLogs: DayEventLogEntry[] = [];
+    const results: SyncEventResult[] = [];
+    const seen = new Set<string>();
+
+    for (const { clientEventId, event } of ordered) {
+      const prior = known.get(clientEventId);
+      if (prior || seen.has(clientEventId)) {
+        // Déjà appliqué (ou doublon dans la même file) → aucun effet, résultat mémorisé.
+        results.push({
+          clientEventId,
+          outcome: "skipped",
+          ...(prior?.rejection ? { rejection: prior.rejection } : {}),
+        });
+        continue;
+      }
+      seen.add(clientEventId);
+
+      const result = transition(state, event);
+      if (result.rejection !== undefined) {
+        eventLogs.push({
+          clientEventId,
+          type: event.type,
+          resultRevision: revision,
+          rejected: true,
+          rejection: result.rejection,
+        });
+        results.push({ clientEventId, outcome: "rejected", rejection: result.rejection });
+        continue;
+      }
+
+      state = result.state;
+      revision += 1;
+      changed = true;
+      const phaseNow = phaseToDayPhase(currentStep(state)?.phase ?? null);
+      const measure = measureEffect(event, phaseNow, userId);
+      if (measure) measures.push(measure);
+      const deviation = deviationEffect(result.deviation, userId);
+      if (deviation) deviations.push(deviation);
+      eventLogs.push({
+        clientEventId,
+        type: event.type,
+        resultRevision: revision,
+        rejected: false,
+        rejection: null,
+      });
+      results.push({ clientEventId, outcome: "applied" });
+    }
+
+    const finished = changed && isFinished(state);
+    const phase = phaseToDayPhase(currentStep(state)?.phase ?? null);
+
+    await this.repo.commitSync(batchId, {
+      changed,
+      phase,
+      state: serialize(state),
+      revision,
+      finished,
+      measures,
+      deviations,
+      eventLogs,
+    });
+
+    const batchStatus: BatchStatus = finished ? "EN_FERMENTATION" : session.batchStatus;
+    return {
+      batchStatus,
+      phase,
+      revision,
+      plan: state.plan,
+      state,
+      timings: stepTiming(state, this.now()),
+      results,
     };
   }
 
@@ -226,6 +331,38 @@ export class BatchDayService {
       timings: stepTiming(state, this.now()),
     };
   }
+}
+
+/** Effet mesure d'un `RECORD_MEASUREMENT` (sinon `undefined`) — phase courante. */
+function measureEffect(
+  event: DayEvent,
+  phase: DayPhase,
+  userId: string | null,
+): MeasureEffect | undefined {
+  if (event.type !== "RECORD_MEASUREMENT") return undefined;
+  return {
+    type: KIND_TO_MEASURE[event.kind],
+    value: event.value,
+    phase,
+    loggedById: userId,
+    loggedAt: new Date(event.at),
+  };
+}
+
+/** Effet écart d'un `FORCE_STEP` (depuis l'intention core), sinon `undefined`. */
+function deviationEffect(
+  deviation: DeviationLog | undefined,
+  userId: string | null,
+): DeviationEffect | undefined {
+  if (!deviation) return undefined;
+  return {
+    step: deviation.stepId,
+    phase: phaseToDayPhase(deviation.phase),
+    reason: deviation.reason,
+    authorId: userId,
+    forcedFromStatus: deviation.forcedFromStatus,
+    occurredAt: new Date(deviation.at),
+  };
 }
 
 /** Sérialise l'instantané core vers une valeur JSON persistable (JSONB). */
