@@ -1,15 +1,17 @@
 /**
- * Dérouleur d'étapes du Jour J (M4-09/10/11) — mode normal : **progression contrôlée**
- * étape par étape (spec « State Machine tolérante »). Rend l'étape courante et
- * l'action contextuelle au `StepStatus` :
+ * Dérouleur d'étapes du Jour J (M4-09/10/11/12) — mode normal : **progression
+ * contrôlée** étape par étape (spec « State Machine tolérante »). Rend l'étape
+ * courante et l'action contextuelle au `StepStatus` :
  * - `PENDING` → « Démarrer l'étape » (`START_STEP`) ;
  * - `AWAITING_STABILIZATION` → `StabilizationGate` (`CONFIRM_STABILIZATION`, M4-10) ;
  * - `TIMER_RUNNING` → `HoldTimer` (compte à rebours, « Valider » à l'écoulement) ;
  * - `AWAITING_VALIDATION` → « Valider l'étape » (`VALIDATE_STEP`), **si** les mesures
  *   requises sont saisies ; sinon on invite à les relever (`MeasurementEntry`, M4-11).
  *
- * Le forçage (M4-12) est hors périmètre. En fin de plan, écran de clôture (batch
- * `EN_FERMENTATION`) avec lien vers la fiche batch.
+ * **Mode manuel** (M4-12) : « Forcer l'étape » est proposé quel que soit le statut
+ * (tant que le brassin n'est pas terminé) → `ForceStepDialog` (motif obligatoire →
+ * `DeviationLog`). Le `DeviationJournal` liste les écarts tracés. En fin de plan,
+ * écran de clôture (batch `EN_FERMENTATION`) avec lien vers la fiche batch.
  */
 
 import {
@@ -18,9 +20,12 @@ import {
   measurementsForStep,
   type StepSpec,
 } from "@brasso/core";
-import { CheckCircle2, Loader2, Play } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Play } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { DeviationJournal } from "@/features/day/DeviationJournal";
+import { ForceStepDialog } from "@/features/day/ForceStepDialog";
 import { HoldTimer } from "@/features/day/HoldTimer";
 import { useDayEvent } from "@/features/day/hooks";
 import { DAY_PHASE_LABELS, MEASUREMENT_LABELS } from "@/features/day/labels";
@@ -47,6 +52,7 @@ export function StepRunner({
   snapshot: unknown;
 }) {
   const event = useDayEvent(batchId);
+  const [forcing, setForcing] = useState(false);
   const { plan, cursor, status } = day.state;
 
   if (cursor >= plan.length) {
@@ -137,6 +143,23 @@ export function StepRunner({
 
       {showMeasures && step ? (
         <MeasurementEntry step={step} state={day.state} snapshot={snapshot} batchId={batchId} />
+      ) : null}
+
+      {step ? (
+        <Button
+          variant="outline"
+          className="w-full max-w-xs text-muted-foreground"
+          onClick={() => setForcing(true)}
+        >
+          <AlertTriangle className="size-5" aria-hidden="true" />
+          Forcer l'étape
+        </Button>
+      ) : null}
+
+      <DeviationJournal batchId={batchId} />
+
+      {forcing && step ? (
+        <ForceStepDialog step={step} batchId={batchId} onClose={() => setForcing(false)} />
       ) : null}
     </div>
   );

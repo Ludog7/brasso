@@ -588,9 +588,9 @@ export interface DaySession {
 export type DayMeasurementKind = "density" | "volume" | "temperature" | "ph";
 
 /**
- * Événement Jour J piloté depuis le dérouleur (M4-09/10/11). Le serveur horodate `at`
- * lui-même en ligne (ADR-08) : le client n'envoie que l'intention. Élargi par le
- * ticket forçage (M4-12).
+ * Événement Jour J piloté depuis le dérouleur (M4-09/10/11/12). Le serveur horodate
+ * `at` lui-même en ligne (ADR-08) : le client n'envoie que l'intention. `FORCE_STEP`
+ * (mode manuel) exige `author` + `reason` (motif obligatoire) et trace un écart.
  */
 export type DayEventRequest =
   | { type: "START_STEP" }
@@ -601,7 +601,24 @@ export type DayEventRequest =
       value: number;
       source?: "manual" | "sensor";
     }
-  | { type: "VALIDATE_STEP" };
+  | { type: "VALIDATE_STEP" }
+  | { type: "FORCE_STEP"; author: string; reason: string };
+
+/**
+ * Entrée du **journal d'écart** d'un batch (M4-12), lecture seule — miroir de
+ * `DeviationView` côté API. Trace d'un forçage : étape, phase, motif, auteur, date.
+ */
+export interface DeviationEntry {
+  id: string;
+  step: string;
+  phase: DayPhase | null;
+  reason: string;
+  /** Nom de l'auteur du forçage (`null` si compte supprimé). */
+  author: string | null;
+  forcedFromStatus: string | null;
+  /** Horodatage métier du forçage (ISO 8601). */
+  occurredAt: string;
+}
 
 export const dayApi = {
   /** Charge la session Jour J. Rejette en 404 `NOT_FOUND` s'il n'y en a pas encore. */
@@ -623,4 +640,10 @@ export const dayApi = {
       method: "POST",
       body: JSON.stringify(event),
     }).then((r) => r.day),
+
+  /** Journal des écarts de procédure du batch (M4-12), du plus ancien au plus récent. */
+  deviations: (batchId: string): Promise<DeviationEntry[]> =>
+    request<{ deviations: DeviationEntry[] }>(`/api/batches/${batchId}/day/deviations`).then(
+      (r) => r.deviations,
+    ),
 };

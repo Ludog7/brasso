@@ -19,6 +19,7 @@ import type {
   DaySyncCommit,
   DayTransitionData,
   DeviationEffect,
+  DeviationRecord,
   MeasureEffect,
 } from "../src/modules/batches/day.repository.js";
 import { SESSION_COOKIE } from "../src/plugins/auth.js";
@@ -142,6 +143,21 @@ class InMemoryDayRepository implements DayRepository {
       });
     }
     return Promise.resolve();
+  }
+  listDeviations(id: string): Promise<DeviationRecord[]> {
+    // Reflète l'ordre d'insertion (déjà chronologique) et résout l'auteur.
+    const rows = this.deviations
+      .filter((d) => d.batchId === id)
+      .map((d, i) => ({
+        id: `dev-${i}`,
+        step: d.step,
+        phase: d.phase,
+        reason: d.reason,
+        authorName: d.authorId,
+        forcedFromStatus: d.forcedFromStatus,
+        occurredAt: d.occurredAt,
+      }));
+    return Promise.resolve(rows);
   }
 }
 
@@ -443,6 +459,41 @@ describe("module batches — session Jour J : appliquer un événement (M4-05)",
         authorId: "brasseur",
         forcedFromStatus: "PENDING",
       });
+    } finally {
+      await close();
+    }
+  });
+
+  it("le journal d'écart liste les forçages (étape, phase, motif, auteur) — M4-12", async () => {
+    try {
+      await start();
+      const deviations = (user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+        inject(app, "GET", "/api/batches/b1/day/deviations", { cookie: cookieFor(user) });
+
+      // Aucun forçage encore : journal vide.
+      expect((await deviations()).json().deviations).toEqual([]);
+
+      // Deux forçages successifs (init puis mash-1).
+      await force(1000);
+      await force(2000);
+
+      const res = await deviations();
+      expect(res.statusCode).toBe(200);
+      const journal = res.json().deviations;
+      expect(journal).toHaveLength(2);
+      expect(journal[0]).toMatchObject({
+        step: "init",
+        phase: "INITIALISATION",
+        reason: "démo déroulé",
+        author: "brasseur",
+        forcedFromStatus: "PENDING",
+      });
+      expect(typeof journal[0].occurredAt).toBe("string");
+      expect(journal[1]).toMatchObject({ step: "mash-1", phase: "EMPATAGE" });
+
+      // RBAC : la caisse lit le journal (read) ; anonyme refusé.
+      expect((await deviations("caisse")).statusCode).toBe(200);
+      expect((await inject(app, "GET", "/api/batches/b1/day/deviations")).statusCode).toBe(401);
     } finally {
       await close();
     }

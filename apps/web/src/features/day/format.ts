@@ -20,6 +20,13 @@ export function formatMinutes(minutes: number | null): string {
   return `${Math.round(minutes * 10) / 10} min`;
 }
 
+/** Date/heure d'un ISO 8601 en format court FR (`14/07/2026 10:32`), ou `—` si invalide. */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short" }).format(date);
+}
+
 /** Valeur d'une mesure, formatée selon son type (unité + précision d'affichage). */
 export function formatMeasurement(kind: MeasurementKind, value: number): string {
   switch (kind) {

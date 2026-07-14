@@ -60,6 +60,15 @@ export const batchDayRoutes: FastifyPluginAsync<BatchDayRoutesOptions> = async (
     return { day: await service.get(id) };
   });
 
+  app.get(
+    "/batches/:id/day/deviations",
+    { config: app.rbac("recettes", "read") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      return { deviations: await service.deviations(id) };
+    },
+  );
+
   app.post(
     "/batches/:id/day/events",
     { config: app.rbac("recettes", "update") },

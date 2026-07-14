@@ -57,6 +57,22 @@ export interface DeviationEffect {
   occurredAt: Date;
 }
 
+/**
+ * Écart de procédure persisté (`DeviationLog`) tel que lu pour le **journal**
+ * (M4-12) : identifiant, étape/phase, motif, **nom** de l'auteur (résolu via la
+ * relation, `null` si l'utilisateur a été supprimé) et horodatage métier.
+ */
+export interface DeviationRecord {
+  id: string;
+  step: string;
+  phase: DayPhase | null;
+  reason: string;
+  /** Nom affichable de l'auteur du forçage (`null` si compte supprimé). */
+  authorName: string | null;
+  forcedFromStatus: string | null;
+  occurredAt: Date;
+}
+
 /** Instantané + effets à persister après une transition acceptée. */
 export interface DayTransitionData {
   phase: DayPhase;
@@ -124,6 +140,8 @@ export interface DayRepository {
   findEventLogs(batchId: string, clientEventIds: string[]): Promise<Map<string, DayEventLogRecord>>;
   /** Persiste le résultat d'une synchro (état + effets + journal) — **atomique**. */
   commitSync(batchId: string, commit: DaySyncCommit): Promise<void>;
+  /** Écarts de procédure du batch (journal M4-12), du plus ancien au plus récent. */
+  listDeviations(batchId: string): Promise<DeviationRecord[]>;
 }
 
 export class PrismaBatchDayRepository implements DayRepository {
@@ -293,5 +311,30 @@ export class PrismaBatchDayRepository implements DayRepository {
         });
       }
     });
+  }
+
+  async listDeviations(batchId: string): Promise<DeviationRecord[]> {
+    const rows = await this.prisma.deviationLog.findMany({
+      where: { batchId },
+      orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        step: true,
+        phase: true,
+        reason: true,
+        forcedFromStatus: true,
+        occurredAt: true,
+        author: { select: { displayName: true } },
+      },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      step: r.step,
+      phase: r.phase,
+      reason: r.reason,
+      forcedFromStatus: r.forcedFromStatus,
+      authorName: r.author?.displayName ?? null,
+      occurredAt: r.occurredAt,
+    }));
   }
 }

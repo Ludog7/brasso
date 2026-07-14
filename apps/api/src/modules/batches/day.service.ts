@@ -36,6 +36,7 @@ import type {
   DayRepository,
   DaySessionRecord,
   DeviationEffect,
+  DeviationRecord,
   MeasureEffect,
 } from "./day.repository.js";
 import { BatchNotFoundError } from "./service.js";
@@ -118,6 +119,22 @@ export interface SyncEventResult {
 /** Vue après synchro d'une file : la session résultante + le sort de chaque événement. */
 export interface DaySyncView extends DaySessionView {
   results: SyncEventResult[];
+}
+
+/**
+ * Entrée du **journal d'écart** (M4-12), lecture seule : trace d'un forçage
+ * (`FORCE_STEP`). Wording neutre côté web — l'écart est une trace, pas une faute.
+ */
+export interface DeviationView {
+  id: string;
+  step: string;
+  phase: DayPhase | null;
+  reason: string;
+  /** Nom de l'auteur du forçage (`null` si le compte a été supprimé). */
+  author: string | null;
+  forcedFromStatus: string | null;
+  /** Horodatage métier du forçage, sérialisé ISO 8601. */
+  occurredAt: string;
 }
 
 export class BatchDayService {
@@ -319,6 +336,16 @@ export class BatchDayService {
     };
   }
 
+  /**
+   * Journal des écarts de procédure du batch (M4-12) — **lecture seule** : liste
+   * les `FORCE_STEP` tracés (étape, phase, motif, auteur, date), du plus ancien au
+   * plus récent. Renvoie une liste vide si aucun forçage (pas de 404 : consultation).
+   */
+  async deviations(batchId: string): Promise<DeviationView[]> {
+    const rows = await this.repo.listDeviations(batchId);
+    return rows.map(toDeviationView);
+  }
+
   /** Reconstruit la vue depuis l'instantané persisté (validé par `dayStateSchema`). */
   private toView(record: DaySessionRecord): DaySessionView {
     const state = dayStateSchema.parse(record.state) as DayState;
@@ -362,6 +389,19 @@ function deviationEffect(
     authorId: userId,
     forcedFromStatus: deviation.forcedFromStatus,
     occurredAt: new Date(deviation.at),
+  };
+}
+
+/** Projette un écart persisté (`DeviationRecord`) vers sa vue journal (date ISO). */
+function toDeviationView(record: DeviationRecord): DeviationView {
+  return {
+    id: record.id,
+    step: record.step,
+    phase: record.phase,
+    reason: record.reason,
+    author: record.authorName,
+    forcedFromStatus: record.forcedFromStatus,
+    occurredAt: record.occurredAt.toISOString(),
   };
 }
 
