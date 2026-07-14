@@ -6,6 +6,7 @@
 import type {
   BjcpStyle,
   CatalogKind,
+  DayEvent,
   DayPhase,
   DayPlan,
   DayState,
@@ -620,6 +621,18 @@ export interface DeviationEntry {
   occurredAt: string;
 }
 
+/** Sort d'un événement rejoué par `:sync` (M4-06) — miroir de `SyncEventResult` côté API. */
+export interface DaySyncResult {
+  clientEventId: string;
+  outcome: "applied" | "skipped" | "rejected";
+  rejection?: string;
+}
+
+/** Réponse de `:sync` : la session serveur à jour + le sort de chaque événement rejoué. */
+export interface DaySyncResponse extends DaySession {
+  results: DaySyncResult[];
+}
+
 export const dayApi = {
   /** Charge la session Jour J. Rejette en 404 `NOT_FOUND` s'il n'y en a pas encore. */
   get: (batchId: string): Promise<DaySession> =>
@@ -646,4 +659,18 @@ export const dayApi = {
     request<{ deviations: DeviationEntry[] }>(`/api/batches/${batchId}/day/deviations`).then(
       (r) => r.deviations,
     ),
+
+  /**
+   * Rejoue une **file d'événements offline** (M4-14) via `:sync` (M4-06) : rejeu
+   * **ordonné + idempotent** (clé `clientEventId`). Renvoie la session serveur
+   * (source de vérité) + le sort de chaque événement (`applied|skipped|rejected`).
+   */
+  sync: (
+    batchId: string,
+    events: { clientEventId: string; event: DayEvent }[],
+  ): Promise<DaySyncResponse> =>
+    request<{ day: DaySyncResponse }>(`/api/batches/${batchId}/day/events:sync`, {
+      method: "POST",
+      body: JSON.stringify({ events }),
+    }).then((r) => r.day),
 };

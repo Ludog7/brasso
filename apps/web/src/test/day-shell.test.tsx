@@ -180,7 +180,9 @@ describe("coquille Jour J tablette (M4-08)", () => {
     installFetch();
     renderApp();
 
-    const indicator = await screen.findByRole("status");
+    // Cible l'indicateur d'en-tête par son nom accessible : la bannière offline
+    // (M4-14) est un second `role="status"` distinct.
+    const indicator = await screen.findByRole("status", { name: /connexion/i });
     expect(indicator).toHaveTextContent("En ligne");
 
     act(() => {
@@ -188,6 +190,8 @@ describe("coquille Jour J tablette (M4-08)", () => {
       window.dispatchEvent(new Event("offline"));
     });
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Hors ligne");
+    expect(await screen.findByRole("status", { name: /connexion/i })).toHaveTextContent(
+      "Hors ligne",
+    );
   });
 });

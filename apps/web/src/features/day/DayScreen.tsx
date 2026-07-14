@@ -14,6 +14,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useBatch } from "@/features/batches/hooks";
 import { useDaySession, useOnlineStatus, useStartDay } from "@/features/day/hooks";
 import { DAY_PHASE_LABELS } from "@/features/day/labels";
+import { OfflineBanner } from "@/features/day/offline/OfflineBanner";
+import { useDaySync } from "@/features/day/offline/sync";
 import { StepRunner } from "@/features/day/StepRunner";
 import { DayToaster } from "@/features/day/toast";
 import { Badge } from "@/ui/badge";
@@ -54,6 +56,8 @@ export function DayScreen() {
   const batch = useBatch(id);
   const session = useDaySession(id);
   const startDay = useStartDay(id);
+  // Rejoue la file offline à la reconnexion / au montage (M4-14).
+  useDaySync(id);
 
   if (batch.isPending || session.isPending) {
     return (
@@ -95,6 +99,8 @@ export function DayScreen() {
         </div>
         <ConnectionIndicator />
       </header>
+
+      <OfflineBanner batchId={id} />
 
       <main className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
         {day ? (
