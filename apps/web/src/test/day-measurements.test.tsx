@@ -200,7 +200,8 @@ describe("saisie de mesures & alertes d'écart Jour J (M4-11)", () => {
     installFetch();
     renderApp();
 
-    const alert = await screen.findByText(/écart/i);
+    // Cible le badge d'écart de mesure (« vs modèle »), distinct du journal d'écart (M4-12).
+    const alert = await screen.findByText(/vs modèle/i);
     expect(alert).toHaveTextContent("vs modèle 1.052");
   });
 

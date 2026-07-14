@@ -9,11 +9,18 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { batchKeys } from "@/features/batches/hooks";
 import { useDayToasts } from "@/features/day/toast";
-import { ApiError, dayApi, type DayEventRequest, type DaySession } from "@/lib/api";
+import {
+  ApiError,
+  dayApi,
+  type DayEventRequest,
+  type DaySession,
+  type DeviationEntry,
+} from "@/lib/api";
 
 /** Fabrique de clés de cache Jour J. */
 export const dayKeys = {
   session: (batchId: string) => ["day", batchId] as const,
+  deviations: (batchId: string) => ["day", batchId, "deviations"] as const,
 };
 
 /**
@@ -32,6 +39,19 @@ export function useDaySession(batchId: string | undefined) {
         throw error;
       }
     },
+  });
+}
+
+/**
+ * Journal des écarts de procédure du batch (M4-12) — **lecture seule**. Rafraîchi
+ * automatiquement après un `FORCE_STEP` (cf. `useDayEvent`). Ne dépend pas d'une
+ * session ouverte : renvoie une liste vide s'il n'y a aucun forçage.
+ */
+export function useDeviations(batchId: string | undefined) {
+  return useQuery({
+    queryKey: dayKeys.deviations(batchId ?? ""),
+    enabled: Boolean(batchId),
+    queryFn: (): Promise<DeviationEntry[]> => dayApi.deviations(batchId as string),
   });
 }
 
@@ -62,9 +82,13 @@ export function useDayEvent(batchId: string) {
   const pushToast = useDayToasts((s) => s.push);
   return useMutation({
     mutationFn: (event: DayEventRequest) => dayApi.postEvent(batchId, event),
-    onSuccess: (session) => {
+    onSuccess: (session, event) => {
       qc.setQueryData(dayKeys.session(batchId), session);
       void qc.invalidateQueries({ queryKey: dayKeys.session(batchId) });
+      // Un forçage vient d'écrire un écart : rafraîchir le journal (M4-12).
+      if (event.type === "FORCE_STEP") {
+        void qc.invalidateQueries({ queryKey: dayKeys.deviations(batchId) });
+      }
       if (session.batchStatus === "EN_FERMENTATION") {
         void qc.invalidateQueries({ queryKey: batchKeys.detail(batchId) });
       }
