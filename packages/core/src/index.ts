@@ -33,6 +33,9 @@ export * from "./formulas/carbonation.js";
 // Formules brassicoles — post-mortem : rendement, atténuation, dilution, blend (M1-11, FORMULES §9).
 export * from "./formulas/postmortem.js";
 
+// Corrections densité pré-ébullition — impact estimé OG/ABV (M4-02, FORMULES §1/§2/§3/§9.3, ADR-11).
+export * from "./formulas/corrections.js";
+
 // Schémas Zod partagés + types d'entrée des recettes par moteur (M1-12/M1-14, ADR-04/ADR-06).
 export * from "./schemas/index.js";
 
