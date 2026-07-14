@@ -8,6 +8,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { batchKeys } from "@/features/batches/hooks";
+import { applyOptimistic, dayQueueKeys, toWireEvent } from "@/features/day/offline/optimistic";
+import { enqueueEvent } from "@/features/day/offline/queue";
 import { useDayToasts } from "@/features/day/toast";
 import {
   ApiError,
@@ -70,23 +72,52 @@ export function useStartDay(batchId: string) {
   });
 }
 
+/** Issue d'un événement : appliqué en ligne (serveur) ou mis en file hors-ligne (optimiste). */
+interface DayEventOutcome {
+  mode: "online" | "offline";
+  session: DaySession;
+}
+
 /**
- * Envoie un événement au dérouleur (`POST /day/events`, M4-05). En succès, la
- * session renvoyée (source de vérité, ADR-08) remplace le cache `['day', batchId]`
- * puis est invalidée ; à la clôture (`EN_FERMENTATION`) le détail du batch est
- * rafraîchi. Un **refus** de la machine (409) déclenche un **toast** sans toucher
- * à l'état local — l'écran reste sur l'étape courante.
+ * Envoie un événement au dérouleur. **En ligne** (`POST /day/events`, M4-05) : la
+ * session renvoyée (source de vérité, ADR-08) remplace le cache `['day', batchId]`.
+ * **Hors-ligne** (M4-14) : `at` est capté, l'événement est validé/appliqué en local
+ * (réducteur pur, optimiste) puis **mis en file IndexedDB** ; la resync (`useDaySync`)
+ * le rejouera via `:sync` à la reconnexion. Un **refus** de la machine (409, serveur
+ * ou local) déclenche un **toast** sans toucher à l'état — l'écran reste sur l'étape.
  */
 export function useDayEvent(batchId: string) {
   const qc = useQueryClient();
   const pushToast = useDayToasts((s) => s.push);
   return useMutation({
-    mutationFn: (event: DayEventRequest) => dayApi.postEvent(batchId, event),
-    onSuccess: (session, event) => {
+    // `always` : la mutation doit s'exécuter **même hors-ligne** (sinon TanStack la met
+    // en pause) pour capter l'événement dans la file locale (M4-14).
+    networkMode: "always",
+    mutationFn: async (request: DayEventRequest): Promise<DayEventOutcome> => {
+      if (navigator.onLine) {
+        return { mode: "online", session: await dayApi.postEvent(batchId, request) };
+      }
+      // Hors-ligne : figer `at`, appliquer en local (peut lever un 409), puis mettre en file.
+      const event = toWireEvent(request, Date.now());
+      const current = qc.getQueryData<DaySession>(dayKeys.session(batchId));
+      if (!current) {
+        throw new ApiError(0, "NETWORK", "Session Jour J indisponible hors-ligne.");
+      }
+      const optimistic = applyOptimistic(current, event);
+      await enqueueEvent({ clientEventId: crypto.randomUUID(), batchId, event });
+      return { mode: "offline", session: optimistic };
+    },
+    onSuccess: ({ mode, session }, request) => {
       qc.setQueryData(dayKeys.session(batchId), session);
+      if (mode === "offline") {
+        // File modifiée → rafraîchir le compteur de la bannière. Pas d'invalidation de
+        // session : hors-ligne, un refetch échouerait et écraserait l'état optimiste.
+        void qc.invalidateQueries({ queryKey: dayQueueKeys.count(batchId) });
+        return;
+      }
       void qc.invalidateQueries({ queryKey: dayKeys.session(batchId) });
       // Un forçage vient d'écrire un écart : rafraîchir le journal (M4-12).
-      if (event.type === "FORCE_STEP") {
+      if (request.type === "FORCE_STEP") {
         void qc.invalidateQueries({ queryKey: dayKeys.deviations(batchId) });
       }
       if (session.batchStatus === "EN_FERMENTATION") {

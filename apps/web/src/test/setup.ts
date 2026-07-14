@@ -1,4 +1,7 @@
 import "@testing-library/jest-dom/vitest";
+// IndexedDB n'existe pas dans jsdom : la file offline Jour J (M4-14) s'appuie sur
+// une implémentation en mémoire pour les tests.
+import "fake-indexeddb/auto";
 
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
