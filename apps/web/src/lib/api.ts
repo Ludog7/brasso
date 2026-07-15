@@ -388,6 +388,132 @@ export const referentialsApi = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stock (M5-03/04/06 api / M5-07 web). Gestion du catalogue : niveaux dérivés du
+// registre append-only, alertes de seuil, mouvements manuels et inventaire.
+// Montants en **centimes** (unités internes) ; l'UI saisit/affiche en euros (×100).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Article de catalogue + agrégats de stock (miroir de `StockItemView` côté API). */
+export interface StockItem {
+  id: string;
+  name: string;
+  kind: CatalogKind;
+  category: IngredientCategory | null;
+  unit: StockUnit;
+  attributes: unknown;
+  defaultUnitCostCents: number | null;
+  reorderThreshold: number | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Niveau courant dérivé du registre (somme des mouvements). */
+  level: number;
+  /** Réservations `RESERVED` en cours (pertinent pour RECETTE). */
+  reservedOutstanding: number;
+  /** Disponible : `level − réservé` (RECETTE) ou `level` (BULK/CONDITIONNEMENT). */
+  available: number;
+  /** Sous le seuil de réappro (différencié par `kind`). */
+  below: boolean;
+}
+
+/** Alerte de réappro (miroir de `StockAlertView`) : un article sous son seuil. */
+export interface StockAlert {
+  id: string;
+  name: string;
+  kind: CatalogKind;
+  level: number;
+  available: number;
+  reorderThreshold: number;
+}
+
+/** Motif d'un mouvement **manuel** (PRODUCTION/SALE exclus, réservés batch/caisse). */
+export type ManualMovementReason =
+  "PURCHASE" | "ADJUSTMENT" | "INVENTORY" | "LOSS" | "RETURN" | "OTHER";
+
+/** Corps de création d'un article (montant en centimes). */
+export interface StockItemCreateInput {
+  name: string;
+  kind: CatalogKind;
+  category?: IngredientCategory;
+  unit: StockUnit;
+  defaultUnitCostCents?: number;
+  reorderThreshold?: number;
+  isActive?: boolean;
+}
+
+/** Patch partiel d'un article — `kind` **non modifiable** après création. */
+export interface StockItemUpdateInput {
+  name?: string;
+  category?: IngredientCategory;
+  unit?: StockUnit;
+  defaultUnitCostCents?: number;
+  reorderThreshold?: number;
+  isActive?: boolean;
+}
+
+/** Corps d'un mouvement manuel (`delta` signé et non nul). */
+export interface StockMovementInput {
+  catalogItemId: string;
+  delta: number;
+  reason: ManualMovementReason;
+  note?: string;
+}
+
+/** Ligne de comptage d'inventaire (quantité comptée ≥ 0). */
+export interface InventoryCountInput {
+  catalogItemId: string;
+  countedQuantity: number;
+  note?: string;
+}
+
+/** Résultat par ligne d'inventaire (miroir de `InventoryLineResult`). */
+export interface InventoryLineResult {
+  catalogItemId: string;
+  previousLevel: number;
+  countedQuantity: number;
+  delta: number;
+  movementId?: string;
+}
+
+export const stockApi = {
+  /** Catalogue + niveaux, filtrable par `kind`. */
+  items: (kind?: CatalogKind): Promise<StockItem[]> => {
+    const suffix = kind ? `?kind=${kind}` : "";
+    return request<{ items: StockItem[] }>(`/api/stock/items${suffix}`).then((r) => r.items);
+  },
+
+  /** Articles sous leur seuil (triés par criticité). */
+  alerts: (): Promise<StockAlert[]> =>
+    request<{ items: StockAlert[] }>("/api/stock/alerts").then((r) => r.items),
+
+  createItem: (input: StockItemCreateInput): Promise<StockItem> =>
+    request<{ item: StockItem }>("/api/stock/items", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.item),
+
+  updateItem: (id: string, input: StockItemUpdateInput): Promise<StockItem> =>
+    request<{ item: StockItem }>(`/api/stock/items/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }).then((r) => r.item),
+
+  /** Enregistre un mouvement manuel → renvoie le mouvement + le nouveau niveau. */
+  createMovement: (input: StockMovementInput): Promise<{ level: number }> =>
+    request<{ level: number }>("/api/stock/movements", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  /** Applique un inventaire (comptages) → un ajustement par écart. */
+  applyInventory: (counts: InventoryCountInput[]): Promise<InventoryLineResult[]> =>
+    request<{ lines: InventoryLineResult[] }>("/api/stock/inventory", {
+      method: "POST",
+      body: JSON.stringify({ counts }),
+    }).then((r) => r.lines),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Profils d'équipement (M3-03 api / M3-07 web). Miroir de `EquipmentProfileView`
 // côté API ; dates sérialisées ISO. Le corps de création réutilise le schéma Zod
 // partagé `@brasso/core` (validation client alignée, ADR-04).
