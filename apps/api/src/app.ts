@@ -18,6 +18,8 @@ import type { RecipeRepository } from "./modules/recipes/repository.js";
 import { recipesRoutes } from "./modules/recipes/routes.js";
 import type { CatalogRepository } from "./modules/referentials/repository.js";
 import { referentialsRoutes } from "./modules/referentials/routes.js";
+import type { StockRepository } from "./modules/stock/repository.js";
+import { stockRoutes } from "./modules/stock/routes.js";
 import authPlugin from "./plugins/auth.js";
 import configPlugin from "./plugins/config.js";
 import errorHandler from "./plugins/errorHandler.js";
@@ -38,6 +40,8 @@ export interface BuildAppOptions {
   dayRepository?: DayRepository;
   /** Repository de catalogue injecté (tests) ; sinon adossé à Prisma. */
   catalogRepository?: CatalogRepository;
+  /** Repository de stock injecté (tests) ; sinon adossé à Prisma. */
+  stockRepository?: StockRepository;
 }
 
 /**
@@ -77,6 +81,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     prefix: "/api",
     catalogRepository: opts.catalogRepository,
   });
+  await app.register(stockRoutes, { prefix: "/api", repository: opts.stockRepository });
 
   return app;
 }
