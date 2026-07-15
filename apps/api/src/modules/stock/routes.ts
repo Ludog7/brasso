@@ -7,8 +7,11 @@ import { PrismaStockRepository } from "./repository.js";
 import {
   catalogItemCreateBody,
   catalogItemUpdateBody,
+  inventoryBody,
+  movementListQuery,
   stockItemListQuery,
   stockLotCreateBody,
+  stockMovementBody,
 } from "./schema.js";
 import { StockService } from "./service.js";
 
@@ -64,4 +67,27 @@ export const stockRoutes: FastifyPluginAsync<StockRoutesOptions> = async (app, o
       return reply.code(201).send({ lot });
     },
   );
+
+  // Registre append-only : un mouvement manuel (achat, ajustement, forfait BULK,
+  // perte…). `PRODUCTION`/`SALE` sont exclus par le schéma (batch / hub caisse).
+  app.post("/stock/movements", { config: app.rbac("stocks", "update") }, async (request, reply) => {
+    const body = stockMovementBody.parse(request.body);
+    const result = await service.createMovement(body, request.user?.id ?? null);
+    return reply.code(201).send(result);
+  });
+
+  app.get("/stock/items/:id/movements", { config: app.rbac("stocks", "read") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { limit, offset } = movementListQuery.parse(request.query);
+    const { movements, total } = await service.listMovements(id, { limit, offset });
+    return { movements, total, limit, offset };
+  });
+
+  // Inventaire périodique : chaque écart génère un mouvement d'ajustement
+  // `INVENTORY` (transactionnel) ; ligne sans écart = no-op (`unchanged`).
+  app.post("/stock/inventory", { config: app.rbac("stocks", "update") }, async (request) => {
+    const body = inventoryBody.parse(request.body);
+    const lines = await service.applyInventory(body, request.user?.id ?? null);
+    return { lines };
+  });
 };

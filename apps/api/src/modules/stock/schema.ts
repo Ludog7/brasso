@@ -9,6 +9,8 @@ import {
   catalogItemUpdateSchema,
   catalogKindSchema,
   ingredientCategorySchema,
+  inventoryCountSchema,
+  manualStockMovementSchema,
   stockLotSchema,
 } from "@brasso/core";
 import { z } from "zod";
@@ -34,3 +36,20 @@ export const stockItemListQuery = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 export type StockItemListQuery = z.infer<typeof stockItemListQuery>;
+
+/** Corps d'un mouvement manuel (M5-04) — motif restreint, `PRODUCTION`/`SALE` exclus. */
+export const stockMovementBody = manualStockMovementSchema;
+export type StockMovementBody = z.infer<typeof stockMovementBody>;
+
+/** Corps de l'inventaire périodique : au moins une ligne de comptage. */
+export const inventoryBody = z.object({
+  counts: z.array(inventoryCountSchema).min(1),
+});
+export type InventoryBody = z.infer<typeof inventoryBody>;
+
+/** Pagination du registre (`GET /stock/items/:id/movements`). */
+export const movementListQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type MovementListQuery = z.infer<typeof movementListQuery>;

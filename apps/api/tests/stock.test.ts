@@ -13,10 +13,16 @@ import type {
 } from "../src/modules/auth/repository.js";
 import type {
   CatalogItemRecord,
+  InventoryCountLine,
+  InventoryLineResult,
+  MovementCreatedResult,
+  MovementListResult,
+  PaginationInput,
   StockItemDetail,
   StockItemListFilters,
   StockItemListResult,
   StockLotView,
+  StockMovementInsert,
   StockMovementView,
   StockRepository,
 } from "../src/modules/stock/repository.js";
@@ -186,6 +192,73 @@ class InMemoryStockRepository implements StockRepository {
     };
     this.lots.push(lot);
     return Promise.resolve(lot);
+  }
+
+  private levelOf(catalogItemId: string): number {
+    return deriveStockLevel(this.movements.filter((m) => m.catalogItemId === catalogItemId));
+  }
+
+  createMovement(input: StockMovementInsert): Promise<MovementCreatedResult> {
+    const movement = {
+      id: `mv_${++this.seq}`,
+      catalogItemId: input.catalogItemId,
+      delta: input.delta,
+      reason: input.reason,
+      stockLotId: input.stockLotId ?? null,
+      batchId: null,
+      note: input.note ?? null,
+      createdAt: new Date(Date.now() + this.seq),
+    };
+    this.movements.push(movement);
+    const { catalogItemId: _c, ...view } = movement;
+    return Promise.resolve({ movement: view, level: this.levelOf(input.catalogItemId) });
+  }
+
+  listMovements(
+    catalogItemId: string,
+    { limit, offset }: PaginationInput,
+  ): Promise<MovementListResult> {
+    const all = this.movements
+      .filter((m) => m.catalogItemId === catalogItemId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const movements = all
+      .slice(offset, offset + limit)
+      .map(({ catalogItemId: _c, ...view }) => view);
+    return Promise.resolve({ movements, total: all.length });
+  }
+
+  applyInventory(
+    lines: InventoryCountLine[],
+    userId: string | null,
+  ): Promise<InventoryLineResult[]> {
+    void userId;
+    const results: InventoryLineResult[] = [];
+    for (const line of lines) {
+      const previousLevel = this.levelOf(line.catalogItemId);
+      const delta = line.countedQuantity - previousLevel;
+      let movementId: string | undefined;
+      if (delta !== 0) {
+        movementId = `mv_${++this.seq}`;
+        this.movements.push({
+          id: movementId,
+          catalogItemId: line.catalogItemId,
+          delta,
+          reason: "INVENTORY",
+          stockLotId: null,
+          batchId: null,
+          note: line.note ?? null,
+          createdAt: new Date(Date.now() + this.seq),
+        });
+      }
+      results.push({
+        catalogItemId: line.catalogItemId,
+        previousLevel,
+        countedQuantity: line.countedQuantity,
+        delta,
+        ...(movementId ? { movementId } : {}),
+      });
+    }
+    return Promise.resolve(results);
   }
 }
 
@@ -462,6 +535,217 @@ describe("module stock — catalogue, lots & niveaux dérivés (M5-03)", () => {
       expect(caisseLot.statusCode).toBe(403);
 
       const anon = await inject(app, "GET", "/api/stock/items");
+      expect(anon.statusCode).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module stock — mouvements manuels & inventaire (M5-04)", () => {
+  let app: FastifyInstance;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    ({ app, cookieFor } = await makeApp());
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const createBulk = async (): Promise<string> => {
+    const res = await inject(app, "POST", "/api/stock/items", {
+      cookie: cookieFor("brasseur"),
+      payload: { name: "CO2 vrac", kind: "BULK", unit: "UNIT", reorderThreshold: 500 },
+    });
+    return res.json().item.id;
+  };
+
+  it("un mouvement manuel met à jour le niveau dérivé", async () => {
+    try {
+      const id = await createBulk();
+      // Achat +2000, puis purge CO2 −150 (forfait BULK, reason ADJUSTMENT).
+      const buy = await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("brasseur"),
+        payload: { catalogItemId: id, delta: 2000, reason: "PURCHASE" },
+      });
+      expect(buy.statusCode).toBe(201);
+      expect(buy.json()).toMatchObject({ level: 2000, movement: { delta: 2000 } });
+
+      const purge = await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("brasseur"),
+        payload: { catalogItemId: id, delta: -150, reason: "ADJUSTMENT", note: "purge" },
+      });
+      expect(purge.statusCode).toBe(201);
+      expect(purge.json().level).toBe(1850);
+
+      const detail = await inject(app, "GET", `/api/stock/items/${id}`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(detail.json().item.level).toBe(1850);
+    } finally {
+      await close();
+    }
+  });
+
+  it("PRODUCTION / SALE / delta=0 rejetés (400)", async () => {
+    try {
+      const id = await createBulk();
+      for (const payload of [
+        { catalogItemId: id, delta: 10, reason: "PRODUCTION" },
+        { catalogItemId: id, delta: 10, reason: "SALE" },
+        { catalogItemId: id, delta: 0, reason: "ADJUSTMENT" },
+      ]) {
+        const res = await inject(app, "POST", "/api/stock/movements", {
+          cookie: cookieFor("brasseur"),
+          payload,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error.code).toBe("VALIDATION");
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it("registre paginé, ordre createdAt desc", async () => {
+    try {
+      const id = await createBulk();
+      for (const delta of [100, 200, -50]) {
+        await inject(app, "POST", "/api/stock/movements", {
+          cookie: cookieFor("brasseur"),
+          payload: { catalogItemId: id, delta, reason: "ADJUSTMENT" },
+        });
+      }
+      const res = await inject(app, "GET", `/api/stock/items/${id}/movements`, {
+        cookie: cookieFor("caisse"),
+      });
+      expect(res.statusCode).toBe(200);
+      const { movements, total } = res.json();
+      expect(total).toBe(3);
+      // Le plus récent (delta −50) en tête.
+      expect(movements.map((m: { delta: number }) => m.delta)).toEqual([-50, 200, 100]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("inventaire : écart → mouvement INVENTORY au bon delta ; sans écart → unchanged", async () => {
+    try {
+      const withGap = await createBulk();
+      const exact = await createBulk();
+      // withGap : niveau 1000 puis compté 900 → delta −100.
+      await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("brasseur"),
+        payload: { catalogItemId: withGap, delta: 1000, reason: "PURCHASE" },
+      });
+      // exact : niveau 500 puis compté 500 → no-op.
+      await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("brasseur"),
+        payload: { catalogItemId: exact, delta: 500, reason: "PURCHASE" },
+      });
+
+      const res = await inject(app, "POST", "/api/stock/inventory", {
+        cookie: cookieFor("brasseur"),
+        payload: {
+          counts: [
+            { catalogItemId: withGap, countedQuantity: 900 },
+            { catalogItemId: exact, countedQuantity: 500 },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const { lines } = res.json();
+
+      const gapLine = lines.find((l: { catalogItemId: string }) => l.catalogItemId === withGap);
+      expect(gapLine).toMatchObject({ previousLevel: 1000, countedQuantity: 900, delta: -100 });
+      expect(gapLine.movementId).toBeTruthy();
+
+      const exactLine = lines.find((l: { catalogItemId: string }) => l.catalogItemId === exact);
+      expect(exactLine).toMatchObject({ previousLevel: 500, delta: 0 });
+      expect(exactLine.movementId).toBeUndefined();
+
+      // Le niveau de withGap est recalé à 900 et l'ajustement est tracé.
+      const detail = await inject(app, "GET", `/api/stock/items/${withGap}`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(detail.json().item.level).toBe(900);
+      expect(detail.json().item.recentMovements[0].reason).toBe("INVENTORY");
+    } finally {
+      await close();
+    }
+  });
+
+  it("inventaire transactionnel : un article inconnu → 404, aucune écriture", async () => {
+    try {
+      const id = await createBulk();
+      await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("brasseur"),
+        payload: { catalogItemId: id, delta: 1000, reason: "PURCHASE" },
+      });
+
+      const res = await inject(app, "POST", "/api/stock/inventory", {
+        cookie: cookieFor("brasseur"),
+        payload: {
+          counts: [
+            { catalogItemId: id, countedQuantity: 800 },
+            { catalogItemId: "nope", countedQuantity: 10 },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(404);
+
+      // Aucune écriture : le niveau du 1er article reste à 1000.
+      const detail = await inject(app, "GET", `/api/stock/items/${id}`, {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(detail.json().item.level).toBe(1000);
+    } finally {
+      await close();
+    }
+  });
+
+  it("404 sur mouvement/registre d'un article inexistant", async () => {
+    try {
+      const mv = await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("brasseur"),
+        payload: { catalogItemId: "nope", delta: 10, reason: "PURCHASE" },
+      });
+      expect(mv.statusCode).toBe(404);
+
+      const reg = await inject(app, "GET", "/api/stock/items/nope/movements", {
+        cookie: cookieFor("brasseur"),
+      });
+      expect(reg.statusCode).toBe(404);
+    } finally {
+      await close();
+    }
+  });
+
+  it("RBAC : caisse ne peut ni bouger le stock ni saisir l'inventaire ; anon refusé", async () => {
+    try {
+      const id = await createBulk();
+      const caisseMove = await inject(app, "POST", "/api/stock/movements", {
+        cookie: cookieFor("caisse"),
+        payload: { catalogItemId: id, delta: 10, reason: "PURCHASE" },
+      });
+      expect(caisseMove.statusCode).toBe(403);
+
+      const caisseInv = await inject(app, "POST", "/api/stock/inventory", {
+        cookie: cookieFor("caisse"),
+        payload: { counts: [{ catalogItemId: id, countedQuantity: 1 }] },
+      });
+      expect(caisseInv.statusCode).toBe(403);
+
+      // La caisse peut néanmoins lire le registre (stocks:read).
+      const caisseRead = await inject(app, "GET", `/api/stock/items/${id}/movements`, {
+        cookie: cookieFor("caisse"),
+      });
+      expect(caisseRead.statusCode).toBe(200);
+
+      const anon = await inject(app, "POST", "/api/stock/movements", {
+        payload: { catalogItemId: id, delta: 10, reason: "PURCHASE" },
+      });
       expect(anon.statusCode).toBe(401);
     } finally {
       await close();
