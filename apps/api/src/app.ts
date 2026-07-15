@@ -5,6 +5,8 @@ import sensible from "@fastify/sensible";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "./config.js";
+import type { AuditRepository } from "./modules/audit/repository.js";
+import { auditRoutes } from "./modules/audit/routes.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import type { DayRepository } from "./modules/batches/day.repository.js";
@@ -42,6 +44,8 @@ export interface BuildAppOptions {
   catalogRepository?: CatalogRepository;
   /** Repository de stock injecté (tests) ; sinon adossé à Prisma. */
   stockRepository?: StockRepository;
+  /** Repository du journal d'audit injecté (tests) ; sinon adossé à Prisma. */
+  auditRepository?: AuditRepository;
 }
 
 /**
@@ -82,6 +86,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     catalogRepository: opts.catalogRepository,
   });
   await app.register(stockRoutes, { prefix: "/api", repository: opts.stockRepository });
+
+  // Journal d'audit (M6-03) : consommé plus tard par les modules membres/RGPD/
+  // rapprochement (via `AuditService.record`) pour tracer les actions sensibles.
+  await app.register(auditRoutes, { prefix: "/api", repository: opts.auditRepository });
 
   return app;
 }
