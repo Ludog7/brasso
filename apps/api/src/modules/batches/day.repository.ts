@@ -8,7 +8,7 @@
  */
 
 import type { DayPhase, MeasureType, PlanEquipment } from "@brasso/core";
-import type { BatchStatus, Prisma, PrismaClient } from "@brasso/db";
+import type { BatchStatus, CorrectionType, Prisma, PrismaClient } from "@brasso/db";
 
 /** Contexte nécessaire pour démarrer une session : statut + snapshot + profil. */
 export interface DayStartContext {
@@ -119,6 +119,41 @@ export interface DaySyncCommit {
   eventLogs: DayEventLogEntry[];
 }
 
+/**
+ * Contexte nécessaire aux **corrections densité pré-ébullition** (M4-07) : la
+ * copie figée de la recette (pour reconstituer les cibles) et le taux
+ * d'évaporation du profil d'équipement (ou `null` si aucun profil).
+ */
+export interface CorrectionContext {
+  /** Copie figée de la recette (JSONB) — cibles reconstituées côté service. */
+  recipeSnapshot: unknown;
+  /** Taux d'évaporation à l'ébullition (L/h) du profil, ou `null` si aucun profil. */
+  evaporationRateLPerHour: number | null;
+}
+
+/**
+ * Décision de correction à journaliser (`BatchCorrectionLog`, M4-03) — append-only.
+ * La correction est une **trace de décision**, sans impact sur la state machine.
+ */
+export interface CorrectionLogEntry {
+  /** Identifiant de l'étape du plan concernée (ex. `boil-1`). */
+  stepId: string;
+  type: CorrectionType;
+  /** Proposition retenue (chiffres OG/ABV…), stockée telle quelle en JSONB. */
+  payload: Prisma.InputJsonValue;
+  authorId: string | null;
+}
+
+/** Ligne `BatchCorrectionLog` telle que relue après insertion (pour la réponse). */
+export interface CorrectionLogRecord {
+  id: string;
+  stepId: string;
+  type: CorrectionType;
+  payload: unknown;
+  authorId: string | null;
+  createdAt: Date;
+}
+
 export interface DayRepository {
   /** Contexte de démarrage d'un batch ; `null` si le batch n'existe pas. */
   getStartContext(batchId: string): Promise<DayStartContext | null>;
@@ -142,6 +177,14 @@ export interface DayRepository {
   commitSync(batchId: string, commit: DaySyncCommit): Promise<void>;
   /** Écarts de procédure du batch (journal M4-12), du plus ancien au plus récent. */
   listDeviations(batchId: string): Promise<DeviationRecord[]>;
+  /**
+   * Contexte de correction densité (M4-07) : snapshot + évaporation du profil ;
+   * `null` si le batch n'existe pas. Sert de garde d'existence pour la
+   * journalisation comme pour l'aperçu.
+   */
+  getCorrectionContext(batchId: string): Promise<CorrectionContext | null>;
+  /** Journalise une décision de correction (`BatchCorrectionLog`) — append-only. */
+  logCorrection(batchId: string, entry: CorrectionLogEntry): Promise<CorrectionLogRecord>;
 }
 
 export class PrismaBatchDayRepository implements DayRepository {
@@ -336,5 +379,40 @@ export class PrismaBatchDayRepository implements DayRepository {
       authorName: r.author?.displayName ?? null,
       occurredAt: r.occurredAt,
     }));
+  }
+
+  async getCorrectionContext(batchId: string): Promise<CorrectionContext | null> {
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+      select: {
+        recipeSnapshot: true,
+        equipmentProfile: { select: { evaporationRateLPerHour: true } },
+      },
+    });
+    if (!batch) return null;
+    return {
+      recipeSnapshot: batch.recipeSnapshot,
+      evaporationRateLPerHour: batch.equipmentProfile?.evaporationRateLPerHour ?? null,
+    };
+  }
+
+  async logCorrection(batchId: string, entry: CorrectionLogEntry): Promise<CorrectionLogRecord> {
+    return this.prisma.batchCorrectionLog.create({
+      data: {
+        batchId,
+        stepId: entry.stepId,
+        type: entry.type,
+        payload: entry.payload,
+        authorId: entry.authorId,
+      },
+      select: {
+        id: true,
+        stepId: true,
+        type: true,
+        payload: true,
+        authorId: true,
+        createdAt: true,
+      },
+    });
   }
 }

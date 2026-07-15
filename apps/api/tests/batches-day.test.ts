@@ -11,6 +11,9 @@ import type {
   SessionRecord,
 } from "../src/modules/auth/repository.js";
 import type {
+  CorrectionContext,
+  CorrectionLogEntry,
+  CorrectionLogRecord,
   DayEventLogRecord,
   DayRepository,
   DaySessionCreateData,
@@ -71,12 +74,19 @@ class InMemoryDayRepository implements DayRepository {
   private contexts = new Map<string, DayStartContext>();
   private sessions = new Map<string, DaySessionRecord>();
   private eventLogs = new Map<string, DayEventLogRecord & { batchId: string }>();
+  private correctionContexts = new Map<string, CorrectionContext>();
   readonly measures: (MeasureEffect & { batchId: string })[] = [];
   readonly deviations: (DeviationEffect & { batchId: string })[] = [];
+  readonly corrections: (CorrectionLogEntry & { batchId: string })[] = [];
 
   /** Amorce un batch démarrable (statut + snapshot + profil éventuel). */
   seedBatch(id: string, ctx: DayStartContext): void {
     this.contexts.set(id, ctx);
+  }
+
+  /** Amorce le contexte de correction densité d'un batch (snapshot + évaporation). */
+  seedCorrectionContext(id: string, ctx: CorrectionContext): void {
+    this.correctionContexts.set(id, ctx);
   }
 
   getStartContext(id: string): Promise<DayStartContext | null> {
@@ -159,6 +169,20 @@ class InMemoryDayRepository implements DayRepository {
       }));
     return Promise.resolve(rows);
   }
+  getCorrectionContext(id: string): Promise<CorrectionContext | null> {
+    return Promise.resolve(this.correctionContexts.get(id) ?? null);
+  }
+  logCorrection(id: string, entry: CorrectionLogEntry): Promise<CorrectionLogRecord> {
+    this.corrections.push({ batchId: id, ...entry });
+    return Promise.resolve({
+      id: `corr-${this.corrections.length}`,
+      stepId: entry.stepId,
+      type: entry.type,
+      payload: entry.payload,
+      authorId: entry.authorId,
+      createdAt: new Date("2026-07-15T10:00:00Z"),
+    });
+  }
 }
 
 /** Snapshot minimal : buildDayPlan ne lit que `steps`. Brassin BEER complet. */
@@ -172,6 +196,18 @@ const RECIPE_SNAPSHOT = {
     { type: "COOL", params: { targetTempC: 20 }, sortOrder: 3 },
     { type: "FERMENT", params: { days: 14 }, sortOrder: 4 },
   ],
+};
+
+/**
+ * Snapshot BEER complet pour les corrections densité (M4-07) : cibles moteur
+ * (OG/FG, durée d'ébullition, volume) + étapes. Reconstitution attendue avec une
+ * évaporation de 4 L/h : volume final 26 L, évaporation planifiée 4 L → volume
+ * pré-ébullition cible 30 L, densité pré-ébullition ≈ 1.0433.
+ */
+const RECIPE_SNAPSHOT_BEER = {
+  ...RECIPE_SNAPSHOT,
+  engine: "BEER",
+  beerDetails: { targetOg: 1.05, targetFg: 1.012, boilTimeMin: 60, batchVolumeL: 26 },
 };
 
 const USERS: Record<string, string[]> = {
@@ -719,6 +755,151 @@ describe("module batches — session Jour J : rejeu de la file offline (M4-06)",
       await start();
       expect((await sync([forceEvt("e1", 1000)], "caisse")).statusCode).toBe(403);
       expect((await inject(app, "POST", "/api/batches/b1/day/events:sync")).statusCode).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module batches — session Jour J : corrections densité pré-ébullition (M4-07)", () => {
+  let app: FastifyInstance;
+  let day: InMemoryDayRepository;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    day = new InMemoryDayRepository();
+    ({ app, cookieFor } = await makeApp(day));
+    day.seedCorrectionContext("b1", {
+      recipeSnapshot: RECIPE_SNAPSHOT_BEER,
+      evaporationRateLPerHour: 4,
+    });
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const preview = (payload: unknown, user = "brasseur"): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/batches/b1/day/corrections/preview", {
+      cookie: cookieFor(user),
+      payload,
+    });
+  const logDecision = (
+    payload: unknown,
+    user = "brasseur",
+  ): ReturnType<FastifyInstance["inject"]> =>
+    inject(app, "POST", "/api/batches/b1/day/corrections", { cookie: cookieFor(user), payload });
+
+  it("aperçu : densité basse → propositions chiffrées (prolonger l'ébullition + sucre)", async () => {
+    try {
+      // Mesure 1.036 sous la densité pré-ébullition cible (≈ 1.0433) reconstituée.
+      const res = await preview({ measuredGravity: 1.036, measuredVolumeL: 30 });
+      expect(res.statusCode).toBe(200);
+      const { preview: p } = res.json();
+      expect(p.deltaGravity).toBeLessThan(0);
+      // Deux leviers pour remonter l'OG à la cible (§9.3 concentration, §1 sucre).
+      expect(p.proposals.map((x: { kind: string }) => x.kind)).toEqual([
+        "extend_boil",
+        "add_sugar",
+      ]);
+      for (const proposal of p.proposals) {
+        expect(proposal.projectedOg).toBeCloseTo(1.05, 3);
+        expect(proposal.projectedAbv).toBeGreaterThan(0);
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it("journalise la décision retenue (BatchCorrectionLog, append-only, authorId=user)", async () => {
+    try {
+      const res = await logDecision({
+        stepId: "boil-1",
+        type: "EXTEND_BOIL",
+        payload: { extraBoilMin: 66, projectedOg: 1.05 },
+      });
+      expect(res.statusCode).toBe(201);
+      const { correction } = res.json();
+      expect(correction).toMatchObject({
+        stepId: "boil-1",
+        type: "EXTEND_BOIL",
+        authorId: "brasseur",
+      });
+      expect(correction.payload).toEqual({ extraBoilMin: 66, projectedOg: 1.05 });
+      expect(typeof correction.createdAt).toBe("string");
+      // Une ligne persistée, sans effet sur la state machine (aucune session requise).
+      expect(day.corrections).toHaveLength(1);
+      expect(day.corrections[0]).toMatchObject({
+        batchId: "b1",
+        stepId: "boil-1",
+        type: "EXTEND_BOIL",
+        authorId: "brasseur",
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it("aperçu indisponible si le snapshot n'expose pas de cibles BEER → 422", async () => {
+    try {
+      day.seedCorrectionContext("b2", {
+        recipeSnapshot: { steps: [] },
+        evaporationRateLPerHour: 4,
+      });
+      const res = await inject(app, "POST", "/api/batches/b2/day/corrections/preview", {
+        cookie: cookieFor("brasseur"),
+        payload: { measuredGravity: 1.036, measuredVolumeL: 30 },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error.code).toBe("PREBOIL_TARGETS_UNAVAILABLE");
+    } finally {
+      await close();
+    }
+  });
+
+  it("aperçu / journalisation sur un batch inexistant → 404", async () => {
+    try {
+      const previewAbsent = await inject(
+        app,
+        "POST",
+        "/api/batches/absent/day/corrections/preview",
+        {
+          cookie: cookieFor("brasseur"),
+          payload: { measuredGravity: 1.036, measuredVolumeL: 30 },
+        },
+      );
+      expect(previewAbsent.statusCode).toBe(404);
+      const logAbsent = await inject(app, "POST", "/api/batches/absent/day/corrections", {
+        cookie: cookieFor("brasseur"),
+        payload: { stepId: "boil-1", type: "OTHER", payload: {} },
+      });
+      expect(logAbsent.statusCode).toBe(404);
+    } finally {
+      await close();
+    }
+  });
+
+  it("mesure invalide (densité ≤ 1) → 400", async () => {
+    try {
+      const res = await preview({ measuredGravity: 1, measuredVolumeL: 30 });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe("VALIDATION");
+    } finally {
+      await close();
+    }
+  });
+
+  it("RBAC : caisse refusée (update), anonyme refusé", async () => {
+    try {
+      expect(
+        (await preview({ measuredGravity: 1.036, measuredVolumeL: 30 }, "caisse")).statusCode,
+      ).toBe(403);
+      expect(
+        (await logDecision({ stepId: "boil-1", type: "OTHER", payload: {} }, "caisse")).statusCode,
+      ).toBe(403);
+      expect(
+        (await inject(app, "POST", "/api/batches/b1/day/corrections/preview")).statusCode,
+      ).toBe(401);
+      expect((await inject(app, "POST", "/api/batches/b1/day/corrections")).statusCode).toBe(401);
     } finally {
       await close();
     }

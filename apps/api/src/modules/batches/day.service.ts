@@ -17,21 +17,27 @@ import type {
   DeviationLog,
   MeasurementKind,
   MeasureType,
+  PreBoilCorrection,
   StepTiming,
 } from "@brasso/core";
 import {
+  boilGravity,
   buildDayPlan,
   currentStep,
   dayStateSchema,
   initDayState,
   isFinished,
   phaseToDayPhase,
+  points,
+  realAttenuation,
   stepTiming,
+  suggestPreBoilCorrections,
   transition,
 } from "@brasso/core";
-import type { Prisma } from "@brasso/db";
+import type { CorrectionType, Prisma } from "@brasso/db";
 
 import type {
+  CorrectionLogRecord,
   DayEventLogEntry,
   DayRepository,
   DaySessionRecord,
@@ -68,6 +74,20 @@ export class DayEventRejectedError extends Error {
   constructor(reason: string) {
     super(reason);
     this.name = "DayEventRejectedError";
+  }
+}
+
+/**
+ * Cibles pré-ébullition non reconstituables → 422. Le snapshot n'expose pas les
+ * paramètres BEER nécessaires (OG/volume/durée d'ébullition) ou l'équipement n'a
+ * pas de taux d'évaporation : impossible de proposer une correction chiffrée.
+ */
+export class PreBoilTargetsUnavailableError extends Error {
+  readonly statusCode = 422;
+  readonly code = "PREBOIL_TARGETS_UNAVAILABLE";
+  constructor(reason: string) {
+    super(`Aperçu de correction indisponible : ${reason}`);
+    this.name = "PreBoilTargetsUnavailableError";
   }
 }
 
@@ -135,6 +155,33 @@ export interface DeviationView {
   forcedFromStatus: string | null;
   /** Horodatage métier du forçage, sérialisé ISO 8601. */
   occurredAt: string;
+}
+
+/** Mesures pré-ébullition relevées (entrée de l'aperçu de correction, M4-07). */
+export interface PreBoilMeasurement {
+  /** Densité mesurée avant ébullition (SG brute). */
+  measuredGravity: number;
+  /** Volume mesuré avant ébullition (L). */
+  measuredVolumeL: number;
+}
+
+/** Décision de correction retenue à journaliser (M4-07) — append-only. */
+export interface CorrectionDecision {
+  stepId: string;
+  type: CorrectionType;
+  /** Proposition retenue (chiffres OG/ABV…), conservée telle quelle en JSONB. */
+  payload: Record<string, unknown>;
+}
+
+/** Vue d'une décision de correction journalisée (`BatchCorrectionLog`). */
+export interface CorrectionLogView {
+  id: string;
+  stepId: string;
+  type: CorrectionType;
+  payload: unknown;
+  authorId: string | null;
+  /** Horodatage de journalisation, sérialisé ISO 8601. */
+  createdAt: string;
 }
 
 export class BatchDayService {
@@ -346,6 +393,57 @@ export class BatchDayService {
     return rows.map(toDeviationView);
   }
 
+  /**
+   * **Aperçu** de corrections densité pré-ébullition (M4-07, ADR-11 — aide à la
+   * décision, jamais prescriptif) : reconstitue les cibles du modèle depuis le
+   * `recipeSnapshot` figé + le taux d'évaporation de l'équipement, puis délègue le
+   * calcul chiffré à `suggestPreBoilCorrections` (core M4-02). **Aucune écriture.**
+   *
+   * @throws {@link BatchNotFoundError} si le batch n'existe pas (404).
+   * @throws {@link PreBoilTargetsUnavailableError} si le snapshot n'expose pas les
+   *   cibles BEER requises ou l'équipement n'a pas de taux d'évaporation (422).
+   */
+  async previewCorrections(
+    batchId: string,
+    measurement: PreBoilMeasurement,
+  ): Promise<PreBoilCorrection> {
+    const ctx = await this.repo.getCorrectionContext(batchId);
+    if (!ctx) {
+      throw new BatchNotFoundError(batchId);
+    }
+    const targets = reconstitutePreBoilTargets(ctx.recipeSnapshot, ctx.evaporationRateLPerHour);
+    return suggestPreBoilCorrections({
+      measuredGravity: measurement.measuredGravity,
+      measuredVolumeL: measurement.measuredVolumeL,
+      ...targets,
+    });
+  }
+
+  /**
+   * **Journalise** la décision de correction retenue (`BatchCorrectionLog`, M4-03).
+   * Append-only : la correction est une **trace de décision**, sans impact sur la
+   * state machine (aucune transition). `authorId` = utilisateur courant.
+   *
+   * @throws {@link BatchNotFoundError} si le batch n'existe pas (404).
+   */
+  async logCorrection(
+    batchId: string,
+    decision: CorrectionDecision,
+    userId: string | null,
+  ): Promise<CorrectionLogView> {
+    const ctx = await this.repo.getCorrectionContext(batchId);
+    if (!ctx) {
+      throw new BatchNotFoundError(batchId);
+    }
+    const record = await this.repo.logCorrection(batchId, {
+      stepId: decision.stepId,
+      type: decision.type,
+      payload: toJson(decision.payload),
+      authorId: userId,
+    });
+    return toCorrectionView(record);
+  }
+
   /** Reconstruit la vue depuis l'instantané persisté (validé par `dayStateSchema`). */
   private toView(record: DaySessionRecord): DaySessionView {
     const state = dayStateSchema.parse(record.state) as DayState;
@@ -403,6 +501,110 @@ function toDeviationView(record: DeviationRecord): DeviationView {
     forcedFromStatus: record.forcedFromStatus,
     occurredAt: record.occurredAt.toISOString(),
   };
+}
+
+/** Projette une ligne `BatchCorrectionLog` persistée vers sa vue (date ISO). */
+function toCorrectionView(record: CorrectionLogRecord): CorrectionLogView {
+  return {
+    id: record.id,
+    stepId: record.stepId,
+    type: record.type,
+    payload: record.payload,
+    authorId: record.authorId,
+    createdAt: record.createdAt.toISOString(),
+  };
+}
+
+/** Atténuation apparente par défaut (%) quand la recette n'expose pas de FG cible. */
+const DEFAULT_ATTENUATION_PCT = 75;
+
+/** Lecture défensive d'un objet JSON (`null` si valeur non-objet), comme `buildDayPlan`. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+/** Lecture défensive d'un nombre fini ; `undefined` sinon. */
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Cibles du modèle attendues par `suggestPreBoilCorrections` (hors mesures). */
+type PreBoilTargets = Pick<
+  Parameters<typeof suggestPreBoilCorrections>[0],
+  | "targetPreBoilGravity"
+  | "targetPreBoilVolumeL"
+  | "targetOg"
+  | "evaporationRateLPerHour"
+  | "plannedBoilTimeMin"
+  | "expectedAttenuationPct"
+>;
+
+/**
+ * Reconstitue les **cibles pré-ébullition du modèle** depuis le `recipeSnapshot`
+ * figé (moteur BEER) et le taux d'évaporation de l'équipement — miroir de la façon
+ * dont M4-02 les consomme (FORMULES §4.2 pour la densité pré-ébullition, §9.2 pour
+ * l'atténuation apparente attendue).
+ *
+ * - `targetOg`, `plannedBoilTimeMin`, volume final = `beerDetails.{targetOg,
+ *   boilTimeMin, batchVolumeL}` ; `evaporationRate` = profil d'équipement.
+ * - `targetPreBoilVolumeL = batchVolumeL + évaporation planifiée` ; la densité
+ *   pré-ébullition cible en découle par conservation de l'extrait (`boilGravity`).
+ * - `expectedAttenuationPct` = atténuation apparente `targetOg → targetFg` si la
+ *   recette porte une FG plausible, sinon un défaut (75 %).
+ *
+ * Lecture **défensive** du snapshot (JSONB opaque) ; toute cible manquante ou
+ * incohérente lève {@link PreBoilTargetsUnavailableError} plutôt qu'une exception
+ * brute (aperçu simplement indisponible pour ce batch).
+ */
+function reconstitutePreBoilTargets(
+  snapshot: unknown,
+  evaporationRateLPerHour: number | null,
+): PreBoilTargets {
+  const beer = asRecord(asRecord(snapshot)?.beerDetails);
+  const targetOg = finiteNumber(beer?.targetOg);
+  const batchVolumeL = finiteNumber(beer?.batchVolumeL);
+  const plannedBoilTimeMin = finiteNumber(beer?.boilTimeMin);
+  const evaporation = finiteNumber(evaporationRateLPerHour ?? undefined);
+
+  if (targetOg === undefined || !(targetOg > 1)) {
+    throw new PreBoilTargetsUnavailableError("OG cible absente du snapshot (moteur BEER requis)");
+  }
+  if (batchVolumeL === undefined || !(batchVolumeL > 0)) {
+    throw new PreBoilTargetsUnavailableError("volume de brassin cible absent du snapshot");
+  }
+  if (plannedBoilTimeMin === undefined || !(plannedBoilTimeMin > 0)) {
+    throw new PreBoilTargetsUnavailableError("durée d'ébullition absente du snapshot");
+  }
+  if (evaporation === undefined || !(evaporation > 0)) {
+    throw new PreBoilTargetsUnavailableError(
+      "taux d'évaporation du profil d'équipement absent ou nul",
+    );
+  }
+
+  const plannedEvapL = (evaporation * plannedBoilTimeMin) / 60;
+  const targetPreBoilVolumeL = batchVolumeL + plannedEvapL;
+  // Densité pré-ébullition = OG rapportée au volume avant évaporation (§4.2).
+  const targetPreBoilGravity = boilGravity(points(targetOg), batchVolumeL, targetPreBoilVolumeL);
+
+  const targetFg = finiteNumber(beer?.targetFg);
+  const expectedAttenuationPct =
+    targetFg !== undefined && targetFg > 1 && targetFg < targetOg
+      ? realAttenuation(targetOg, targetFg)
+      : DEFAULT_ATTENUATION_PCT;
+
+  return {
+    targetPreBoilGravity,
+    targetPreBoilVolumeL,
+    targetOg,
+    evaporationRateLPerHour: evaporation,
+    plannedBoilTimeMin,
+    expectedAttenuationPct,
+  };
+}
+
+/** Sérialise une valeur JSON quelconque vers une valeur persistable (JSONB). */
+function toJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
 /** Sérialise l'instantané core vers une valeur JSON persistable (JSONB). */
