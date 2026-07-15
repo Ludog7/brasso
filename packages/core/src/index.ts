@@ -59,3 +59,6 @@ export * from "./equipment/index.js";
 
 // Profils d'eau & suggestion de sels brassicoles — chimie indicative (M3-02, FORMULES Annexe D, ADR-11).
 export * from "./water/index.js";
+
+// Calculs de stock purs — niveau dérivé, ajustement au volume réel, seuil de réappro (M5-01, §3.3).
+export * from "./stock/index.js";
