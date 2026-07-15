@@ -46,4 +46,6 @@ export const SETTINGS_SEED = {
   /** TVA 20 % exprimée en ppm (200000 ppm) — entier, jamais de flottant. */
   tvaRatePpm: 200_000,
   timezone: "Europe/Paris",
+  /** Durée de validité d'une cotisation (jours) — adhésion annuelle (M6). */
+  membershipPeriodDays: 365,
 } as const;

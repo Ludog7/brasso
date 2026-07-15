@@ -31,6 +31,7 @@ async function seedSettings(): Promise<void> {
     assoName: SETTINGS_SEED.assoName,
     tvaRatePpm: SETTINGS_SEED.tvaRatePpm,
     timezone: SETTINGS_SEED.timezone,
+    membershipPeriodDays: SETTINGS_SEED.membershipPeriodDays,
     defaultWaterProfile: { ...DEFAULT_WATER_PROFILE },
   };
   await prisma.settings.upsert({
