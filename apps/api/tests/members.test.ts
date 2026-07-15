@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { AnonymizedIdentity, ContributionRecord } from "@brasso/core";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -91,7 +92,15 @@ class InMemoryAuditRepository implements AuditRepository {
     return Promise.resolve(row);
   }
   list(filters: AuditListFilters): Promise<AuditListResult> {
-    return Promise.resolve({ entries: this.rows.slice(0, filters.limit), total: this.rows.length });
+    let rows = [...this.rows];
+    if (filters.memberId !== undefined) rows = rows.filter((r) => r.memberId === filters.memberId);
+    if (filters.action !== undefined) rows = rows.filter((r) => r.action === filters.action);
+    if (filters.resourceType !== undefined)
+      rows = rows.filter((r) => r.resourceType === filters.resourceType);
+    return Promise.resolve({
+      entries: rows.slice(filters.offset, filters.offset + filters.limit),
+      total: rows.length,
+    });
   }
 }
 
@@ -188,6 +197,22 @@ class InMemoryMemberRepository implements MemberRepository {
     list.push(event);
     this.consents.set(memberId, list);
     return Promise.resolve(event);
+  }
+
+  contributions = new Map<string, ContributionRecord[]>();
+  seedContribution(memberId: string, contribution: ContributionRecord): void {
+    const list = this.contributions.get(memberId) ?? [];
+    list.push(contribution);
+    this.contributions.set(memberId, list);
+  }
+  listContributions(memberId: string): Promise<ContributionRecord[]> {
+    return Promise.resolve([...(this.contributions.get(memberId) ?? [])]);
+  }
+  anonymize(id: string, patch: AnonymizedIdentity): Promise<MemberRecord> {
+    const row = this.rows.find((r) => r.id === id);
+    if (!row) throw new Error("not found (should be guarded by service)");
+    Object.assign(row, patch, { updatedAt: new Date() });
+    return Promise.resolve(row);
   }
 }
 
@@ -394,3 +419,96 @@ describe("consentements RGPD historisés (M6-05)", () => {
     expect(denied.statusCode).toBe(403);
   });
 });
+
+describe("RGPD — export & anonymisation (M6-06)", () => {
+  let members: InMemoryMemberRepository;
+  let audit: InMemoryAuditRepository;
+  let app: FastifyInstance;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    members = new InMemoryMemberRepository(365);
+    audit = new InMemoryAuditRepository();
+    members.seed({
+      id: "m1",
+      memberNumber: "A-001",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ada@example.org",
+      phone: "0600000000",
+    });
+    members.seedContribution("m1", {
+      amountCents: 2500,
+      currency: "EUR",
+      occurredAt: new Date("2026-01-15T00:00:00Z"),
+      reference: "HA-1",
+    });
+    ({ app, cookieFor } = await makeApp(members, audit));
+  });
+
+  it("exporte le dossier complet (rgpd) ; admin interdit (403)", async () => {
+    await req(app, "POST", "/api/members/m1/consents", cookieFor("rgpd"), {
+      type: "PHOTOS",
+      granted: true,
+    });
+    const res = await req(app, "GET", "/api/members/m1/export", cookieFor("rgpd"));
+    expect(res.statusCode).toBe(200);
+    const dossier = res.json() as {
+      schemaVersion: number;
+      member: { memberNumber: string };
+      consents: { current: Record<string, unknown>; history: unknown[] };
+      contributions: unknown[];
+      auditTrail: unknown[];
+    };
+    expect(dossier.schemaVersion).toBe(1);
+    expect(dossier.member.memberNumber).toBe("A-001");
+    expect(dossier.contributions).toHaveLength(1);
+    expect(dossier.consents.history).toHaveLength(1);
+    expect(dossier.auditTrail.length).toBeGreaterThan(0);
+    expect(audit.rows.some((e) => e.action === "MEMBER_EXPORT")).toBe(true);
+
+    // export/anonymize réservés à `rgpd` : admin (CRUD membres) est refusé.
+    expect((await req(app, "GET", "/api/members/m1/export", cookieFor("admin"))).statusCode).toBe(
+      403,
+    );
+  });
+
+  it("anonymise (efface la PII, conserve numéro/agrégats) ; irréversible (409)", async () => {
+    const res = await req(app, "POST", "/api/members/m1/anonymize", cookieFor("rgpd"));
+    expect(res.statusCode).toBe(200);
+    const member = (res.json() as { member: MemberRecordView }).member;
+    expect(member.email).toBeNull();
+    expect(member.phone).toBeNull();
+    expect(member.firstName).toBe("Membre");
+    expect(member.memberNumber).toBe("A-001"); // agrégat préservé
+    expect(audit.rows.some((e) => e.action === "MEMBER_ANONYMIZE")).toBe(true);
+
+    // Les cotisations et la piste d'audit demeurent après anonymisation.
+    const dossier = await req(app, "GET", "/api/members/m1/export", cookieFor("rgpd"));
+    expect((dossier.json() as { contributions: unknown[] }).contributions).toHaveLength(1);
+
+    // 2ᵉ appel → 409 (irréversible).
+    const again = await req(app, "POST", "/api/members/m1/anonymize", cookieFor("rgpd"));
+    expect(again.statusCode).toBe(409);
+  });
+
+  it("RBAC anonymize : admin 403, brasseur 403 ; 404 si absent", async () => {
+    expect(
+      (await req(app, "POST", "/api/members/m1/anonymize", cookieFor("admin"))).statusCode,
+    ).toBe(403);
+    expect(
+      (await req(app, "POST", "/api/members/m1/anonymize", cookieFor("brasseur"))).statusCode,
+    ).toBe(403);
+    expect(
+      (await req(app, "POST", "/api/members/nope/anonymize", cookieFor("rgpd"))).statusCode,
+    ).toBe(404);
+  });
+});
+
+/** Vue partielle d'un membre renvoyée par l'API (assez pour les assertions). */
+interface MemberRecordView {
+  memberNumber: string;
+  firstName: string;
+  email: string | null;
+  phone: string | null;
+}

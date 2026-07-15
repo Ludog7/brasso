@@ -5,7 +5,14 @@
  * La suppression n'est pas exposée (droit à l'effacement = anonymisation, M6-06).
  */
 
-import { CONSENT_TYPES, deriveMembershipStatus, resolveConsents } from "@brasso/core";
+import {
+  anonymizeMember,
+  buildMemberExport,
+  CONSENT_TYPES,
+  deriveMembershipStatus,
+  type MemberExport,
+  resolveConsents,
+} from "@brasso/core";
 import type { AssociativeRole, ConsentType, MembershipStatus } from "@brasso/db";
 
 import type { AuditService } from "../audit/service.js";
@@ -34,6 +41,16 @@ export class MemberNumberTakenError extends Error {
   constructor(memberNumber: string) {
     super(`Le numéro d'adhérent ${memberNumber} est déjà utilisé`);
     this.name = "MemberNumberTakenError";
+  }
+}
+
+/** Anonymisation déjà effectuée (irréversible) → 409. */
+export class MemberAlreadyAnonymizedError extends Error {
+  readonly statusCode = 409;
+  readonly code = "MEMBER_ALREADY_ANONYMIZED";
+  constructor(id: string) {
+    super(`Le membre ${id} a déjà été anonymisé (opération irréversible)`);
+    this.name = "MemberAlreadyAnonymizedError";
   }
 }
 
@@ -170,6 +187,78 @@ export class MemberService {
       metadata: { type: input.type, granted: input.granted },
     });
     return toConsentEventView(event);
+  }
+
+  /**
+   * Assemble le **dossier RGPD** portable (droit d'accès) : identité, consentements,
+   * cotisations rapprochées, piste d'audit. Trace `MEMBER_EXPORT`. RBAC `export`.
+   */
+  async exportDossier(id: string, actor: Actor): Promise<MemberExport> {
+    const record = await this.requireMember(id);
+    const [periodDays, consents, contributions, audit] = await Promise.all([
+      this.repo.membershipPeriodDays(),
+      this.repo.listConsents(id),
+      this.repo.listContributions(id),
+      this.audit.list({ memberId: id, limit: 500, offset: 0 }),
+    ]);
+    const dossier = buildMemberExport({
+      member: {
+        memberNumber: record.memberNumber,
+        firstName: record.firstName,
+        lastName: record.lastName,
+        email: record.email,
+        phone: record.phone,
+        address: record.address,
+        birthDate: record.birthDate,
+        membership: deriveMembershipStatus(record.lastContributionAt, periodDays, new Date()),
+      },
+      consents: consents.map((e) => ({ type: e.type, granted: e.granted, at: e.createdAt })),
+      contributions,
+      auditTrail: audit.entries.map((a) => ({
+        action: a.action,
+        at: a.createdAt,
+        resourceType: a.resourceType,
+      })),
+    });
+    await this.audit.record({
+      userId: actor.userId,
+      action: "MEMBER_EXPORT",
+      resourceType: "member",
+      resourceId: id,
+      memberId: id,
+      ip: actor.ip,
+    });
+    return dossier;
+  }
+
+  /**
+   * **Anonymise** un membre (pseudonymisation §3.4, irréversible). Efface la PII,
+   * délie le compte `User`, conserve `memberNumber`/agrégats/audit. Trace
+   * `MEMBER_ANONYMIZE` (le marqueur d'idempotence). RBAC `anonymize`.
+   */
+  async anonymize(id: string, actor: Actor): Promise<MemberView> {
+    await this.requireMember(id);
+    // Idempotence sans champ dédié : une trace MEMBER_ANONYMIZE ⇒ déjà anonymisé.
+    const prior = await this.audit.list({
+      memberId: id,
+      action: "MEMBER_ANONYMIZE",
+      limit: 1,
+      offset: 0,
+    });
+    if (prior.total > 0) {
+      throw new MemberAlreadyAnonymizedError(id);
+    }
+    const record = await this.repo.anonymize(id, anonymizeMember());
+    const periodDays = await this.repo.membershipPeriodDays();
+    await this.audit.record({
+      userId: actor.userId,
+      action: "MEMBER_ANONYMIZE",
+      resourceType: "member",
+      resourceId: id,
+      memberId: id,
+      ip: actor.ip,
+    });
+    return toView(record, periodDays, new Date());
   }
 
   private async requireMember(id: string): Promise<MemberRecord> {
