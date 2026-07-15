@@ -10,7 +10,11 @@
 
 import type { BatchStatus, MeasureType, Prisma, PrismaClient, ReservationStatus } from "@brasso/db";
 
-import { consumeReservationsForBatch, prismaConsumePort } from "../stock/consume.js";
+import {
+  consumeReservationsForBatch,
+  plannedVolumeFromSnapshot,
+  prismaConsumePort,
+} from "../stock/consume.js";
 
 /** Réservation de stock d'un batch (vue). L'unité est celle du `CatalogItem`. */
 export interface ReservationView {
@@ -84,6 +88,27 @@ export interface ReservationInput {
   quantity: number;
 }
 
+/** Une ligne de coût (quantité + coût unitaire catalogue, `null` si inconnu). */
+export interface CostLine {
+  quantity: number;
+  unitCostCents: number | null;
+}
+
+/**
+ * Entrées du coût de revient d'un batch (M5-06), valorisées au coût **catalogue**
+ * (`defaultUnitCostCents`). `produced` = mouvements `PRODUCTION` (quantités
+ * réellement consommées, M5-05) ; `reservations` = réservations `RESERVED`
+ * (estimation planifiée) ; `conditioning` = mouvements sur articles
+ * `CONDITIONNEMENT` du batch.
+ */
+export interface BatchCostInputs {
+  plannedVolumeL: number | null;
+  actualVolumeL: number | null;
+  reservations: CostLine[];
+  produced: CostLine[];
+  conditioning: CostLine[];
+}
+
 export interface BatchRepository {
   list(filters: BatchListFilters): Promise<BatchSummaryView[]>;
   findById(id: string): Promise<BatchDetailView | null>;
@@ -112,6 +137,8 @@ export interface BatchRepository {
    * dans la même transaction ; `actorId` = auteur des mouvements `PRODUCTION`.
    */
   transition(id: string, status: BatchStatus, actorId?: string | null): Promise<BatchDetailView>;
+  /** Entrées de coût de revient d'un batch (M5-06) ; `null` si le batch n'existe pas. */
+  getCostInputs(batchId: string): Promise<BatchCostInputs | null>;
 }
 
 const SUMMARY_SELECT = {
@@ -260,6 +287,60 @@ export class PrismaBatchRepository implements BatchRepository {
       await consumeReservationsForBatch(prismaConsumePort(tx), id, actorId);
       return tx.batch.findUniqueOrThrow({ where: { id }, select: DETAIL_SELECT });
     });
+  }
+
+  async getCostInputs(batchId: string): Promise<BatchCostInputs | null> {
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+      select: { recipeSnapshot: true },
+    });
+    if (!batch) {
+      return null;
+    }
+    const [volumeMeasure, reservations, movements] = await this.prisma.$transaction([
+      this.prisma.batchMeasure.findFirst({
+        where: { batchId, type: "VOLUME" },
+        orderBy: { loggedAt: "desc" },
+        select: { value: true },
+      }),
+      this.prisma.stockReservation.findMany({
+        where: { batchId, status: "RESERVED" },
+        select: { quantity: true, catalogItem: { select: { defaultUnitCostCents: true } } },
+      }),
+      this.prisma.stockMovement.findMany({
+        where: { batchId },
+        select: {
+          delta: true,
+          reason: true,
+          catalogItem: { select: { kind: true, defaultUnitCostCents: true } },
+        },
+      }),
+    ]);
+
+    const produced: CostLine[] = movements
+      .filter((m) => m.reason === "PRODUCTION" && m.catalogItem.kind !== "CONDITIONNEMENT")
+      .map((m) => ({
+        quantity: Math.abs(m.delta),
+        unitCostCents: m.catalogItem.defaultUnitCostCents,
+      }));
+    const conditioning: CostLine[] = movements
+      .filter((m) => m.catalogItem.kind === "CONDITIONNEMENT")
+      .map((m) => ({
+        quantity: Math.abs(m.delta),
+        unitCostCents: m.catalogItem.defaultUnitCostCents,
+      }));
+    const reservationLines: CostLine[] = reservations.map((r) => ({
+      quantity: r.quantity,
+      unitCostCents: r.catalogItem.defaultUnitCostCents,
+    }));
+
+    return {
+      plannedVolumeL: plannedVolumeFromSnapshot(batch.recipeSnapshot),
+      actualVolumeL: volumeMeasure?.value ?? null,
+      reservations: reservationLines,
+      produced,
+      conditioning,
+    };
   }
 
   async availableByItem(catalogItemIds: string[]): Promise<Map<string, number>> {

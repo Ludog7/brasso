@@ -9,6 +9,7 @@ import { PrismaBatchRepository } from "./repository.js";
 import {
   batchCreateBody,
   batchListQuery,
+  costQuery,
   measureCreateBody,
   measureListQuery,
   statusChangeBody,
@@ -78,5 +79,13 @@ export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (ap
     const { id } = idParams.parse(request.params);
     const { status } = statusChangeBody.parse(request.body);
     return { batch: await service.changeStatus(id, status, request.user?.id ?? null) };
+  });
+
+  // Coût de revient **estimé** (coûts de référence catalogue, hors coût lot réel) :
+  // consommé après ensemencement (mouvements PRODUCTION), sinon planifié (réservations).
+  app.get("/batches/:id/cost", { config: app.rbac("recettes", "read") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const options = costQuery.parse(request.query);
+    return { cost: await service.cost(id, options) };
   });
 };

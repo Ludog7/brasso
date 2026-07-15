@@ -5,7 +5,8 @@
  * catalogués. Le batch ne suit jamais les versions ultérieures de la recette.
  */
 
-import type { BatchStatus } from "@brasso/core";
+import type { BatchCostResult, BatchStatus } from "@brasso/core";
+import { computeBatchCost } from "@brasso/core";
 import type { Prisma } from "@brasso/db";
 
 import type {
@@ -95,6 +96,22 @@ export interface BatchPlanResult {
   unreservedIngredients: string[];
   /** Articles dont le stock disponible est inférieur au besoin (non bloquant). */
   stockWarnings: StockWarning[];
+}
+
+/** Options de calcul du coût de revient (imputation bulk + unités conditionnées). */
+export interface BatchCostOptions {
+  bulkForfaitCents?: number;
+  packagedUnits?: number;
+}
+
+/**
+ * Coût de revient **estimé** d'un batch (M5-06) : sortie de `computeBatchCost`
+ * (coûts de **référence catalogue**, hors coût lot réel) + la base retenue.
+ * `basis: "consumed"` = valorisé sur les quantités réellement consommées
+ * (mouvements `PRODUCTION`) ; `"planned"` = sur les réservations (avant ensemencement).
+ */
+export interface BatchCostView extends BatchCostResult {
+  basis: "consumed" | "planned";
 }
 
 export class BatchService {
@@ -198,6 +215,32 @@ export class BatchService {
   async listMeasures(id: string, type?: MeasureCreateData["type"]): Promise<MeasureView[]> {
     await this.get(id);
     return this.repo.listMeasures(id, type);
+  }
+
+  /**
+   * Coût de revient **estimé** d'un batch (M5-06). Ingrédients RECETTE valorisés
+   * sur les mouvements `PRODUCTION` si le batch est ensemencé (`basis:"consumed"`),
+   * sinon sur les réservations (`basis:"planned"`) ; conditionnement = mouvements
+   * du batch sur articles `CONDITIONNEMENT` ; volume = réel (mesure `VOLUME`) sinon
+   * planifié. Estimation aux coûts **catalogue** (hors coût lot réel). 404 si absent.
+   */
+  async cost(id: string, options: BatchCostOptions = {}): Promise<BatchCostView> {
+    const inputs = await this.repo.getCostInputs(id);
+    if (!inputs) {
+      throw new BatchNotFoundError(id);
+    }
+    const consumed = inputs.produced.length > 0;
+    const batchVolumeL = inputs.actualVolumeL ?? inputs.plannedVolumeL;
+    const result = computeBatchCost({
+      ingredients: consumed ? inputs.produced : inputs.reservations,
+      conditioning: inputs.conditioning,
+      ...(options.bulkForfaitCents !== undefined
+        ? { bulkForfaitCents: options.bulkForfaitCents }
+        : {}),
+      ...(batchVolumeL !== null ? { batchVolumeL } : {}),
+      ...(options.packagedUnits !== undefined ? { packagedUnits: options.packagedUnits } : {}),
+    });
+    return { ...result, basis: consumed ? "consumed" : "planned" };
   }
 }
 

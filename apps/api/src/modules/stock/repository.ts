@@ -135,6 +135,8 @@ export interface MovementListResult {
 
 export interface StockRepository {
   listItems(filters: StockItemListFilters): Promise<StockItemListResult>;
+  /** Articles actifs porteurs d'un seuil, avec agrégats (candidats aux alertes). */
+  listAlertCandidates(): Promise<StockItemAggregate[]>;
   findItemDetail(id: string): Promise<StockItemDetail | null>;
   /** Article seul (sans agrégats) — pour les gardes 404 / `kind` immuable. */
   findItemById(id: string): Promise<CatalogItemRecord | null>;
@@ -222,9 +224,22 @@ export class PrismaStockRepository implements StockRepository {
       this.prisma.catalogItem.count({ where }),
     ]);
 
+    return {
+      items: await this.decorateWithAggregates(items),
+      total,
+    };
+  }
+
+  /**
+   * Décore une page d'articles avec leur niveau dérivé et leurs réservations
+   * `RESERVED` — 2 requêtes agrégées (pas de N+1), somme des `delta` (= niveau,
+   * `deriveStockLevel` au niveau ensembliste) et des réservations en cours.
+   */
+  private async decorateWithAggregates(items: CatalogItemRecord[]): Promise<StockItemAggregate[]> {
     const ids = items.map((item) => item.id);
-    // Agrégats en 2 requêtes (pas de N+1) : somme des deltas (= `deriveStockLevel`
-    // au niveau ensembliste) et somme des réservations RESERVED en cours.
+    if (ids.length === 0) {
+      return [];
+    }
     const [movementSums, reservationSums] = await this.prisma.$transaction([
       this.prisma.stockMovement.groupBy({
         by: ["catalogItemId"],
@@ -239,20 +254,29 @@ export class PrismaStockRepository implements StockRepository {
         orderBy: { catalogItemId: "asc" },
       }),
     ]);
-
     const levelById = new Map(movementSums.map((row) => [row.catalogItemId, row._sum?.delta ?? 0]));
     const reservedById = new Map(
       reservationSums.map((row) => [row.catalogItemId, row._sum?.quantity ?? 0]),
     );
+    return items.map((item) => ({
+      ...item,
+      level: levelById.get(item.id) ?? 0,
+      reservedOutstanding: reservedById.get(item.id) ?? 0,
+    }));
+  }
 
-    return {
-      items: items.map((item) => ({
-        ...item,
-        level: levelById.get(item.id) ?? 0,
-        reservedOutstanding: reservedById.get(item.id) ?? 0,
-      })),
-      total,
-    };
+  /**
+   * Articles actifs **porteurs d'un seuil** (`reorderThreshold` non nul) avec
+   * agrégats — candidats aux alertes de réappro (M5-06). Le filtrage `below` et le
+   * tri par criticité sont appliqués côté service via `evaluateReorder`.
+   */
+  async listAlertCandidates(): Promise<StockItemAggregate[]> {
+    const items = await this.prisma.catalogItem.findMany({
+      where: { isActive: true, reorderThreshold: { not: null } },
+      select: ITEM_SELECT,
+      orderBy: { name: "asc" },
+    });
+    return this.decorateWithAggregates(items);
   }
 
   async findItemDetail(id: string): Promise<StockItemDetail | null> {

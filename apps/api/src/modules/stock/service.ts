@@ -82,6 +82,16 @@ export interface StockItemView extends StockItemAggregate {
   below: boolean;
 }
 
+/** Alerte de réappro : un article sous son seuil (M5-06). `reorderThreshold` non nul. */
+export interface StockAlertView {
+  id: string;
+  name: string;
+  kind: StockItemAggregate["kind"];
+  level: number;
+  available: number;
+  reorderThreshold: number;
+}
+
 /** Détail d'un article : vue + lots + derniers mouvements. */
 export interface StockItemDetailView extends StockItemView {
   lots: StockLotView[];
@@ -107,6 +117,29 @@ export class StockService {
   ): Promise<{ items: StockItemView[]; total: number }> {
     const { items, total } = await this.repo.listItems(filters);
     return { items: items.map(withReorder), total };
+  }
+
+  /**
+   * Alertes de réappro (M5-06) : parcourt les articles actifs porteurs d'un seuil,
+   * applique le seuil différencié par `kind` (`evaluateReorder`) et ne remonte que
+   * les articles `below`, triés par **criticité** (`available − seuil` croissant :
+   * les plus en manque d'abord).
+   */
+  async listAlerts(): Promise<StockAlertView[]> {
+    const candidates = await this.repo.listAlertCandidates();
+    return candidates
+      .map((item) => ({ item, reorder: withReorder(item) }))
+      .filter(({ reorder }) => reorder.below)
+      .map(({ item, reorder }) => ({
+        id: item.id,
+        name: item.name,
+        kind: item.kind,
+        level: item.level,
+        available: reorder.available,
+        // `below` implique un seuil non nul (garanti par `evaluateReorder`).
+        reorderThreshold: item.reorderThreshold as number,
+      }))
+      .sort((a, b) => a.available - a.reorderThreshold - (b.available - b.reorderThreshold));
   }
 
   async getItem(id: string): Promise<StockItemDetailView> {

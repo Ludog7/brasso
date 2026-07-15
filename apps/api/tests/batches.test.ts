@@ -12,6 +12,7 @@ import type {
   SessionRecord,
 } from "../src/modules/auth/repository.js";
 import type {
+  BatchCostInputs,
   BatchCreateData,
   BatchDetailView,
   BatchListFilters,
@@ -114,11 +115,17 @@ class InMemoryBatchRepository implements BatchRepository {
   private store = new Map<string, BatchDetailView>();
   private stock = new Map<string, number>();
   private measures: (MeasureView & { batchId: string })[] = [];
+  private costInputs = new Map<string, BatchCostInputs>();
   private seq = 0;
 
   /** Amorce un stock disponible pour un article (tests de warning). */
   setStock(catalogItemId: string, quantity: number): void {
     this.stock.set(catalogItemId, quantity);
+  }
+
+  /** Amorce les entrées de coût de revient d'un batch (tests M5-06). */
+  seedCostInputs(id: string, inputs: BatchCostInputs): void {
+    this.costInputs.set(id, inputs);
   }
 
   list(filters: BatchListFilters): Promise<BatchSummaryView[]> {
@@ -223,6 +230,9 @@ class InMemoryBatchRepository implements BatchRepository {
     const updated: BatchDetailView = { ...existing, status, ...milestone, updatedAt: now };
     this.store.set(id, updated);
     return Promise.resolve(updated);
+  }
+  getCostInputs(id: string): Promise<BatchCostInputs | null> {
+    return Promise.resolve(this.costInputs.get(id) ?? null);
   }
 }
 
@@ -682,6 +692,127 @@ describe("module batches — mesures & transitions de statut (M3-06)", () => {
         403,
       );
       expect((await setStatus(id, "EN_BRASSAGE", "caisse")).statusCode).toBe(403);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module batches — coût de revient estimé (M5-06)", () => {
+  let app: FastifyInstance;
+  let batches: InMemoryBatchRepository;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    batches = new InMemoryBatchRepository();
+    ({ app, cookieFor } = await makeApp(new StubRecipeRepository(), batches));
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const getCost = (id: string, query = "", user = "brasseur") =>
+    inject(app, "GET", `/api/batches/${id}/cost${query}`, { cookie: cookieFor(user) });
+
+  it("batch ensemencé : valorise les mouvements consommés (basis:consumed) + coût au litre réel", async () => {
+    try {
+      // Consommé : 5000 g × 1 c + 200 g × 8 c = 5000 + 1600 = 6600 ; volume réel 15 L.
+      batches.seedCostInputs("b1", {
+        plannedVolumeL: 20,
+        actualVolumeL: 15,
+        reservations: [{ quantity: 5000, unitCostCents: 1 }],
+        produced: [
+          { quantity: 5000, unitCostCents: 1 },
+          { quantity: 200, unitCostCents: 8 },
+        ],
+        conditioning: [{ quantity: 60, unitCostCents: 25 }], // +1500
+      });
+      const res = await getCost("b1");
+      expect(res.statusCode).toBe(200);
+      const cost = res.json().cost;
+      expect(cost.basis).toBe("consumed");
+      expect(cost.ingredientsCents).toBe(6600);
+      expect(cost.conditioningCents).toBe(1500);
+      expect(cost.totalCents).toBe(8100);
+      // Volume réel 15 L : round(8100 / 15) = 540.
+      expect(cost.costPerLiterCents).toBe(540);
+    } finally {
+      await close();
+    }
+  });
+
+  it("batch non ensemencé : valorise les réservations (basis:planned) + volume planifié", async () => {
+    try {
+      batches.seedCostInputs("b2", {
+        plannedVolumeL: 20,
+        actualVolumeL: null,
+        reservations: [{ quantity: 4000, unitCostCents: 2 }],
+        produced: [],
+        conditioning: [],
+      });
+      const res = await getCost("b2");
+      const cost = res.json().cost;
+      expect(cost.basis).toBe("planned");
+      expect(cost.totalCents).toBe(8000);
+      // Volume planifié 20 L faute de mesure : round(8000 / 20) = 400.
+      expect(cost.costPerLiterCents).toBe(400);
+    } finally {
+      await close();
+    }
+  });
+
+  it("coût inconnu (defaultUnitCostCents null) → missingCostLines, ligne comptée 0", async () => {
+    try {
+      batches.seedCostInputs("b3", {
+        plannedVolumeL: 20,
+        actualVolumeL: null,
+        reservations: [
+          { quantity: 5000, unitCostCents: 1 },
+          { quantity: 200, unitCostCents: null },
+        ],
+        produced: [],
+        conditioning: [],
+      });
+      const cost = (await getCost("b3")).json().cost;
+      expect(cost.ingredientsCents).toBe(5000);
+      expect(cost.missingCostLines).toBe(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it("bulkForfaitCents + packagedUnits en query", async () => {
+    try {
+      batches.seedCostInputs("b4", {
+        plannedVolumeL: 20,
+        actualVolumeL: null,
+        reservations: [{ quantity: 1000, unitCostCents: 1 }],
+        produced: [],
+        conditioning: [],
+      });
+      // total = 1000 + bulk 500 = 1500 ; €/unité = round(1500 / 60) = 25.
+      const cost = (await getCost("b4", "?bulkForfaitCents=500&packagedUnits=60")).json().cost;
+      expect(cost.bulkCents).toBe(500);
+      expect(cost.totalCents).toBe(1500);
+      expect(cost.costPerPackagedUnitCents).toBe(25);
+    } finally {
+      await close();
+    }
+  });
+
+  it("404 si batch absent ; RBAC : caisse lit, anonyme refusé", async () => {
+    try {
+      expect((await getCost("nope")).statusCode).toBe(404);
+
+      batches.seedCostInputs("b5", {
+        plannedVolumeL: 20,
+        actualVolumeL: null,
+        reservations: [{ quantity: 1000, unitCostCents: 1 }],
+        produced: [],
+        conditioning: [],
+      });
+      expect((await getCost("b5", "", "caisse")).statusCode).toBe(200);
+      expect((await inject(app, "GET", "/api/batches/b5/cost")).statusCode).toBe(401);
     } finally {
       await close();
     }

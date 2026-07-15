@@ -166,6 +166,9 @@ class InMemoryStockRepo implements StockRepository {
   listItems(): never {
     throw new Error("non sollicité");
   }
+  listAlertCandidates(): never {
+    throw new Error("non sollicité");
+  }
   findItemDetail(): never {
     throw new Error("non sollicité");
   }
@@ -265,6 +268,9 @@ class InMemoryBatchRepo implements BatchRepository {
     throw new Error("non sollicité");
   }
   listMeasures(): never {
+    throw new Error("non sollicité");
+  }
+  getCostInputs(): never {
     throw new Error("non sollicité");
   }
 }
