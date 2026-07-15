@@ -246,6 +246,11 @@ model Settings {
   /// Fuseau horaire de l'instance (IANA), défaut France métropolitaine.
   timezone String @default("Europe/Paris")
 
+  /// Durée de validité d'une cotisation, en **jours** (entier, jamais de flottant).
+  /// Le statut d'adhésion se dérive de cette période + `Member.lastContributionAt`
+  /// (M6 ; ADR-01 : aucune constante métier hardcodée hors de cette table).
+  membershipPeriodDays Int @default(365)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -333,6 +338,13 @@ model Member {
   birthDate    DateTime?
   membership   MembershipStatus  @default(EN_RETARD)
   roles        AssociativeRole[] @default([])
+
+  /// Horodatage de la **dernière cotisation rapprochée** (`occurredAt` de la
+  /// transaction `MEMBERSHIP`, posé par le rapprochement M6). `null` = aucune
+  /// cotisation connue → `EN_RETARD`. Source de vérité du statut, avec la période
+  /// `Settings.membershipPeriodDays` (statut dérivé, `membership` = cache).
+  lastContributionAt DateTime?
+
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
