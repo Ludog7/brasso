@@ -40,3 +40,13 @@ export type MeasureListQuery = z.infer<typeof measureListQuery>;
 /** Corps de transition de statut (`POST /api/batches/:id/status`). */
 export const statusChangeBody = z.object({ status: batchStatusSchema });
 export type StatusChangeBody = z.infer<typeof statusChangeBody>;
+
+/**
+ * Paramètres du coût de revient (`GET /api/batches/:id/cost`) : imputation bulk
+ * forfaitaire (centimes) et nombre d'unités conditionnées (coût à l'unité).
+ */
+export const costQuery = z.object({
+  bulkForfaitCents: z.coerce.number().int().nonnegative().optional(),
+  packagedUnits: z.coerce.number().int().positive().optional(),
+});
+export type CostQuery = z.infer<typeof costQuery>;

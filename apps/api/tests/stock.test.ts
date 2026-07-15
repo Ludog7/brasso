@@ -18,6 +18,7 @@ import type {
   MovementCreatedResult,
   MovementListResult,
   PaginationInput,
+  StockItemAggregate,
   StockItemDetail,
   StockItemListFilters,
   StockItemListResult,
@@ -120,6 +121,13 @@ class InMemoryStockRepository implements StockRepository {
       items: page.map((item) => ({ ...item, ...this.aggregate(item.id) })),
       total,
     });
+  }
+
+  listAlertCandidates(): Promise<StockItemAggregate[]> {
+    const rows = [...this.items.values()]
+      .filter((i) => i.isActive && i.reorderThreshold !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return Promise.resolve(rows.map((item) => ({ ...item, ...this.aggregate(item.id) })));
   }
 
   findItemDetail(id: string): Promise<StockItemDetail | null> {
@@ -747,6 +755,110 @@ describe("module stock — mouvements manuels & inventaire (M5-04)", () => {
         payload: { catalogItemId: id, delta: 10, reason: "PURCHASE" },
       });
       expect(anon.statusCode).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("module stock — alertes de seuil (M5-06)", () => {
+  let app: FastifyInstance;
+  let stock: InMemoryStockRepository;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    ({ app, stock, cookieFor } = await makeApp());
+  });
+  const close = async (): Promise<void> => {
+    await app.close();
+  };
+
+  const create = async (body: unknown, user = "brasseur"): Promise<string> => {
+    const res = await inject(app, "POST", "/api/stock/items", {
+      cookie: cookieFor(user),
+      payload: body,
+    });
+    return res.json().item.id;
+  };
+
+  it("ne remonte que les articles sous seuil, triés par criticité", async () => {
+    try {
+      // RECETTE Malt : niveau 4000, réservé 3000, seuil 1500 → dispo 1000 (crit −500).
+      const malt = await create({
+        name: "Malt Pale",
+        kind: "RECETTE",
+        category: "MALT",
+        unit: "GRAM",
+        reorderThreshold: 1500,
+      });
+      stock.seedMovement(malt, 5000);
+      stock.seedMovement(malt, -1000);
+      stock.seedReservation(malt, 3000);
+
+      // BULK CO2 : niveau 400, seuil 500, une réservation IGNORÉE → dispo 400 (crit −100).
+      const co2 = await create(
+        { name: "CO2 vrac", kind: "BULK", unit: "UNIT", reorderThreshold: 500 },
+        "admin",
+      );
+      stock.seedMovement(co2, 400);
+      stock.seedReservation(co2, 9999);
+
+      // RECETTE Houblon : niveau 5000, seuil 100 → au-dessus, pas d'alerte.
+      const hop = await create({
+        name: "Houblon",
+        kind: "RECETTE",
+        category: "HOP",
+        unit: "GRAM",
+        reorderThreshold: 100,
+      });
+      stock.seedMovement(hop, 5000);
+
+      // Article sans seuil → jamais candidat.
+      const eau = await create({ name: "Eau", kind: "BULK", unit: "LITER" });
+      stock.seedMovement(eau, 0);
+
+      const res = await inject(app, "GET", "/api/stock/alerts", { cookie: cookieFor("brasseur") });
+      expect(res.statusCode).toBe(200);
+      const { items } = res.json();
+      // Malt (crit −500) avant CO2 (crit −100) ; hop et eau absents.
+      expect(items.map((i: { id: string }) => i.id)).toEqual([malt, co2]);
+      expect(items[0]).toMatchObject({
+        name: "Malt Pale",
+        kind: "RECETTE",
+        level: 4000,
+        available: 1000,
+        reorderThreshold: 1500,
+      });
+      // BULK : disponible = niveau (réservation ignorée).
+      expect(items[1]).toMatchObject({ kind: "BULK", level: 400, available: 400 });
+    } finally {
+      await close();
+    }
+  });
+
+  it("aucune alerte quand tout est au-dessus du seuil", async () => {
+    try {
+      const id = await create({
+        name: "Malt",
+        kind: "RECETTE",
+        category: "MALT",
+        unit: "GRAM",
+        reorderThreshold: 100,
+      });
+      stock.seedMovement(id, 5000);
+      const res = await inject(app, "GET", "/api/stock/alerts", { cookie: cookieFor("caisse") });
+      expect(res.json().items).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("RBAC : caisse lit les alertes ; anonyme refusé", async () => {
+    try {
+      expect(
+        (await inject(app, "GET", "/api/stock/alerts", { cookie: cookieFor("caisse") })).statusCode,
+      ).toBe(200);
+      expect((await inject(app, "GET", "/api/stock/alerts")).statusCode).toBe(401);
     } finally {
       await close();
     }

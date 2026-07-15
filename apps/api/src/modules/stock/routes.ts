@@ -40,6 +40,12 @@ export const stockRoutes: FastifyPluginAsync<StockRoutesOptions> = async (app, o
     return { items, total, limit, offset };
   });
 
+  // Alertes de réappro : articles actifs sous leur seuil (différencié par kind),
+  // triés par criticité. Route statique distincte de `/stock/items/:id`.
+  app.get("/stock/alerts", { config: app.rbac("stocks", "read") }, async () => {
+    return { items: await service.listAlerts() };
+  });
+
   app.get("/stock/items/:id", { config: app.rbac("stocks", "read") }, async (request) => {
     const { id } = idParams.parse(request.params);
     return { item: await service.getItem(id) };
