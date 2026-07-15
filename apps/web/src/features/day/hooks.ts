@@ -4,6 +4,7 @@
  * `useOnlineStatus` expose l'état de connexion pour l'indicateur atelier.
  */
 
+import type { PreBoilCorrection } from "@brasso/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
@@ -13,16 +14,22 @@ import { enqueueEvent } from "@/features/day/offline/queue";
 import { useDayToasts } from "@/features/day/toast";
 import {
   ApiError,
+  type CorrectionDecisionInput,
+  type CorrectionEntry,
   dayApi,
   type DayEventRequest,
   type DaySession,
   type DeviationEntry,
+  type PreBoilMeasurementInput,
 } from "@/lib/api";
 
 /** Fabrique de clés de cache Jour J. */
 export const dayKeys = {
   session: (batchId: string) => ["day", batchId] as const,
   deviations: (batchId: string) => ["day", batchId, "deviations"] as const,
+  /** Aperçu de correction : dépend des mesures pré-ébullition relevées (M4-13). */
+  correctionsPreview: (batchId: string, m: PreBoilMeasurementInput) =>
+    ["day", batchId, "corrections", "preview", m.measuredGravity, m.measuredVolumeL] as const,
 };
 
 /**
@@ -54,6 +61,42 @@ export function useDeviations(batchId: string | undefined) {
     queryKey: dayKeys.deviations(batchId ?? ""),
     enabled: Boolean(batchId),
     queryFn: (): Promise<DeviationEntry[]> => dayApi.deviations(batchId as string),
+  });
+}
+
+/**
+ * **Aperçu** des corrections densité pré-ébullition (M4-13) — aide à la décision
+ * (ADR-11). Interroge `POST /day/corrections/preview` dès que les mesures
+ * pré-ébullition sont relevées (`measurement` non nul) : le serveur reconstitue les
+ * cibles du modèle et renvoie l'écart + les propositions chiffrées. Lecture seule,
+ * sans effet sur la state machine.
+ */
+export function usePreBoilCorrections(
+  batchId: string,
+  measurement: PreBoilMeasurementInput | null,
+) {
+  return useQuery({
+    queryKey: measurement
+      ? dayKeys.correctionsPreview(batchId, measurement)
+      : ["day", batchId, "corrections", "preview", "idle"],
+    enabled: measurement !== null,
+    queryFn: (): Promise<PreBoilCorrection> =>
+      dayApi.previewCorrections(batchId, measurement as PreBoilMeasurementInput),
+  });
+}
+
+/**
+ * **Journalise** la décision de correction retenue (M4-13) : `POST /day/corrections`
+ * (append-only, aucun impact sur la machine). En succès/échec, un toast confirme la
+ * trace — le composant garde par ailleurs l'état « décision enregistrée » localement.
+ */
+export function useRecordCorrection(batchId: string) {
+  const pushToast = useDayToasts((s) => s.push);
+  return useMutation({
+    mutationFn: (decision: CorrectionDecisionInput): Promise<CorrectionEntry> =>
+      dayApi.recordCorrection(batchId, decision),
+    onSuccess: () => pushToast("Décision de correction enregistrée (trace conservée)."),
+    onError: () => pushToast("Enregistrement impossible. Vérifie la connexion et réessaie."),
   });
 }
 

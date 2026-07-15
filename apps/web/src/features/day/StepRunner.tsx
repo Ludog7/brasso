@@ -10,8 +10,9 @@
  *
  * **Mode manuel** (M4-12) : « Forcer l'étape » est proposé quel que soit le statut
  * (tant que le brassin n'est pas terminé) → `ForceStepDialog` (motif obligatoire →
- * `DeviationLog`). Le `DeviationJournal` liste les écarts tracés. En fin de plan,
- * écran de clôture (batch `EN_FERMENTATION`) avec lien vers la fiche batch.
+ * `DeviationLog`). Le `DeviationJournal` liste les écarts tracés. À la filtration
+ * (`LAUTER`), `PreBoilCorrections` (M4-13) propose des corrections densité chiffrées.
+ * En fin de plan, écran de clôture (batch `EN_FERMENTATION`) avec lien vers la fiche.
  */
 
 import {
@@ -31,6 +32,7 @@ import { useDayEvent } from "@/features/day/hooks";
 import { DAY_PHASE_LABELS, MEASUREMENT_LABELS } from "@/features/day/labels";
 import { MeasurementEntry } from "@/features/day/MeasurementEntry";
 import { PhaseProgress } from "@/features/day/PhaseProgress";
+import { PreBoilCorrections } from "@/features/day/PreBoilCorrections";
 import { StabilizationGate } from "@/features/day/StabilizationGate";
 import type { DaySession } from "@/lib/api";
 import { Button } from "@/ui/button";
@@ -143,6 +145,10 @@ export function StepRunner({
 
       {showMeasures && step ? (
         <MeasurementEntry step={step} state={day.state} snapshot={snapshot} batchId={batchId} />
+      ) : null}
+
+      {step?.phase === "LAUTER" ? (
+        <PreBoilCorrections step={step} state={day.state} batchId={batchId} />
       ) : null}
 
       {step ? (

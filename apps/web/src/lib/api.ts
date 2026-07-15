@@ -13,6 +13,7 @@ import type {
   EquipmentProfileInput,
   IngredientCategory,
   IngredientUse,
+  PreBoilCorrection,
   ProcessStepType,
   RecipeIngredientInput,
   RecipeStepInput,
@@ -621,6 +622,37 @@ export interface DeviationEntry {
   occurredAt: string;
 }
 
+/** Mesures pré-ébullition envoyées à l'aperçu de correction (M4-07/13). */
+export interface PreBoilMeasurementInput {
+  measuredGravity: number;
+  measuredVolumeL: number;
+}
+
+/** Type de correction densité (miroir de l'enum Prisma `CorrectionType`, M4-03). */
+export type CorrectionType = "EXTEND_BOIL" | "ADD_SUGAR" | "DILUTE" | "OTHER";
+
+/**
+ * Décision de correction densité **journalisée** (M4-07) — miroir de
+ * `CorrectionLogView` côté API : la trace append-only de la décision retenue.
+ */
+export interface CorrectionEntry {
+  id: string;
+  stepId: string;
+  type: CorrectionType;
+  /** Proposition retenue conservée telle quelle (chiffres OG/ABV…). */
+  payload: unknown;
+  authorId: string | null;
+  /** Horodatage de journalisation (ISO 8601). */
+  createdAt: string;
+}
+
+/** Corps de journalisation d'une décision de correction (M4-07). */
+export interface CorrectionDecisionInput {
+  stepId: string;
+  type: CorrectionType;
+  payload: Record<string, unknown>;
+}
+
 /** Sort d'un événement rejoué par `:sync` (M4-06) — miroir de `SyncEventResult` côté API. */
 export interface DaySyncResult {
   clientEventId: string;
@@ -659,6 +691,30 @@ export const dayApi = {
     request<{ deviations: DeviationEntry[] }>(`/api/batches/${batchId}/day/deviations`).then(
       (r) => r.deviations,
     ),
+
+  /**
+   * **Aperçu** des corrections densité pré-ébullition (M4-07) — aide à la décision
+   * (ADR-11), sans écriture : le serveur reconstitue les cibles du modèle et renvoie
+   * l'écart + les propositions chiffrées (OG/ABV projetés).
+   */
+  previewCorrections: (
+    batchId: string,
+    measurement: PreBoilMeasurementInput,
+  ): Promise<PreBoilCorrection> =>
+    request<{ preview: PreBoilCorrection }>(`/api/batches/${batchId}/day/corrections/preview`, {
+      method: "POST",
+      body: JSON.stringify(measurement),
+    }).then((r) => r.preview),
+
+  /** Journalise la décision de correction retenue (M4-07) — append-only, trace visible. */
+  recordCorrection: (
+    batchId: string,
+    decision: CorrectionDecisionInput,
+  ): Promise<CorrectionEntry> =>
+    request<{ correction: CorrectionEntry }>(`/api/batches/${batchId}/day/corrections`, {
+      method: "POST",
+      body: JSON.stringify(decision),
+    }).then((r) => r.correction),
 
   /**
    * Rejoue une **file d'événements offline** (M4-14) via `:sync` (M4-06) : rejeu
