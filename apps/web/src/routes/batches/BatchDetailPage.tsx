@@ -2,11 +2,13 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { FermentationCharts } from "@/features/batches/charts/FermentationCharts";
+import { CostPanel } from "@/features/batches/CostPanel";
 import { useBatch } from "@/features/batches/hooks";
 import { FERMENTATION_STEP_LABELS, STATUS_LABELS, STATUS_TONE } from "@/features/batches/labels";
 import { MeasuresJournal } from "@/features/batches/MeasuresJournal";
 import { fermentationPlanFromSnapshot } from "@/features/batches/planning";
 import { StatusActions } from "@/features/batches/StatusActions";
+import { StockDeductionPanel } from "@/features/batches/StockDeductionPanel";
 import { useEquipmentProfile } from "@/features/equipment/hooks";
 import type { BatchDetail, StockWarning } from "@/lib/api";
 import { Badge } from "@/ui/badge";
@@ -90,7 +92,6 @@ export function BatchDetailPage() {
   const data = batch.data;
   const names = namesFromSnapshot(data.recipeSnapshot);
   const recipeName = recipeNameFromSnapshot(data.recipeSnapshot);
-  const reserved = data.reservations.filter((r) => r.status === "RESERVED");
   const fermentation = fermentationPlanFromSnapshot(data.recipeSnapshot);
   const dates = keyDates(data);
 
@@ -211,31 +212,9 @@ export function BatchDetailPage() {
 
         <MeasuresJournal batchId={data.id} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Stock réservé</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {reserved.length > 0 ? (
-              <ul className="flex flex-col gap-2">
-                {reserved.map((r) => (
-                  <li
-                    key={r.id}
-                    className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-0 last:pb-0"
-                  >
-                    <span>{names.get(r.catalogItemId) ?? r.catalogItemId}</span>
-                    <span className="flex items-center gap-2">
-                      <span className="font-medium">{r.quantity}</span>
-                      <Badge tone="success">Réservé</Badge>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">Aucune réservation de stock.</p>
-            )}
-          </CardContent>
-        </Card>
+        <CostPanel batchId={data.id} />
+
+        <StockDeductionPanel reservations={data.reservations} names={names} />
       </main>
     </div>
   );
