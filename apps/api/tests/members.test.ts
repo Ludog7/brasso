@@ -18,12 +18,17 @@ import type {
   SessionRecord,
 } from "../src/modules/auth/repository.js";
 import type {
+  ConsentEventRecord,
   MemberListFilters,
   MemberListResult,
   MemberRecord,
   MemberRepository,
 } from "../src/modules/members/repository.js";
-import type { MemberCreateInput, MemberUpdateInput } from "../src/modules/members/schema.js";
+import type {
+  ConsentInput,
+  MemberCreateInput,
+  MemberUpdateInput,
+} from "../src/modules/members/schema.js";
 import { SESSION_COOKIE } from "../src/plugins/auth.js";
 
 const config: AppConfig = {
@@ -165,6 +170,24 @@ class InMemoryMemberRepository implements MemberRepository {
   }
   membershipPeriodDays(): Promise<number> {
     return Promise.resolve(this.periodDays);
+  }
+
+  private consents = new Map<string, ConsentEventRecord[]>();
+  private consentSeq = 0;
+  listConsents(memberId: string): Promise<ConsentEventRecord[]> {
+    return Promise.resolve([...(this.consents.get(memberId) ?? [])]);
+  }
+  addConsent(memberId: string, input: ConsentInput): Promise<ConsentEventRecord> {
+    const event: ConsentEventRecord = {
+      id: `c${++this.consentSeq}`,
+      type: input.type,
+      granted: input.granted,
+      createdAt: new Date(Date.UTC(2026, 0, this.consentSeq)), // dates croissantes déterministes
+    };
+    const list = this.consents.get(memberId) ?? [];
+    list.push(event);
+    this.consents.set(memberId, list);
+    return Promise.resolve(event);
   }
 }
 
@@ -308,5 +331,66 @@ describe("fichier membres (M6-04)", () => {
     expect((await req(app, "GET", "/api/members", cookieFor("brasseur"))).statusCode).toBe(403);
     expect((await req(app, "GET", "/api/members", cookieFor("caisse"))).statusCode).toBe(403);
     expect((await req(app, "GET", "/api/members", undefined)).statusCode).toBe(401);
+  });
+});
+
+describe("consentements RGPD historisés (M6-05)", () => {
+  let members: InMemoryMemberRepository;
+  let audit: InMemoryAuditRepository;
+  let app: FastifyInstance;
+  let cookieFor: (u: string) => string;
+
+  beforeEach(async () => {
+    members = new InMemoryMemberRepository(365);
+    audit = new InMemoryAuditRepository();
+    members.seed({ id: "m1", memberNumber: "A-001", firstName: "Ada", lastName: "Lovelace" });
+    ({ app, cookieFor } = await makeApp(members, audit));
+  });
+
+  it("ajoute des événements append-only et résout l'état courant (dernier par type)", async () => {
+    // Octroi puis retrait de COMMUNICATION ; octroi de PHOTOS.
+    await req(app, "POST", "/api/members/m1/consents", cookieFor("rgpd"), {
+      type: "COMMUNICATION",
+      granted: true,
+    });
+    await req(app, "POST", "/api/members/m1/consents", cookieFor("rgpd"), {
+      type: "PHOTOS",
+      granted: true,
+    });
+    const last = await req(app, "POST", "/api/members/m1/consents", cookieFor("rgpd"), {
+      type: "COMMUNICATION",
+      granted: false,
+    });
+    expect(last.statusCode).toBe(201);
+
+    const res = await req(app, "GET", "/api/members/m1/consents", cookieFor("admin"));
+    const body = res.json() as {
+      current: Record<string, { granted: boolean } | null>;
+      history: unknown[];
+    };
+    expect(body.history).toHaveLength(3); // append-only : rien n'est écrasé
+    expect(body.current.COMMUNICATION).toMatchObject({ granted: false }); // dernier = retrait
+    expect(body.current.PHOTOS).toMatchObject({ granted: true });
+    expect(body.current.NOTIFICATIONS_LEGALES).toBeNull();
+  });
+
+  it("trace CONSENT_CHANGE et CONSENT_READ", async () => {
+    await req(app, "POST", "/api/members/m1/consents", cookieFor("rgpd"), {
+      type: "PHOTOS",
+      granted: true,
+    });
+    await req(app, "GET", "/api/members/m1/consents", cookieFor("rgpd"));
+    expect(audit.rows.some((e) => e.action === "CONSENT_CHANGE" && e.memberId === "m1")).toBe(true);
+    expect(audit.rows.some((e) => e.action === "CONSENT_READ" && e.memberId === "m1")).toBe(true);
+  });
+
+  it("404 si le membre est inconnu ; RBAC (brasseur 403)", async () => {
+    const missing = await req(app, "GET", "/api/members/nope/consents", cookieFor("admin"));
+    expect(missing.statusCode).toBe(404);
+    const denied = await req(app, "POST", "/api/members/m1/consents", cookieFor("brasseur"), {
+      type: "PHOTOS",
+      granted: true,
+    });
+    expect(denied.statusCode).toBe(403);
   });
 });
