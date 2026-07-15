@@ -5,12 +5,17 @@
  * La suppression n'est pas exposée (droit à l'effacement = anonymisation, M6-06).
  */
 
-import { deriveMembershipStatus } from "@brasso/core";
-import type { AssociativeRole, MembershipStatus } from "@brasso/db";
+import { CONSENT_TYPES, deriveMembershipStatus, resolveConsents } from "@brasso/core";
+import type { AssociativeRole, ConsentType, MembershipStatus } from "@brasso/db";
 
 import type { AuditService } from "../audit/service.js";
-import type { MemberListFilters, MemberRecord, MemberRepository } from "./repository.js";
-import type { MemberCreateInput, MemberUpdateInput } from "./schema.js";
+import type {
+  ConsentEventRecord,
+  MemberListFilters,
+  MemberRecord,
+  MemberRepository,
+} from "./repository.js";
+import type { ConsentInput, MemberCreateInput, MemberUpdateInput } from "./schema.js";
 
 /** Membre introuvable → 404. */
 export class MemberNotFoundError extends Error {
@@ -53,6 +58,20 @@ export interface MemberView {
 export interface Actor {
   userId: string | null;
   ip: string | null;
+}
+
+/** Un événement de consentement sérialisé (date ISO). */
+export interface ConsentEventView {
+  id: string;
+  type: ConsentType;
+  granted: boolean;
+  createdAt: string;
+}
+
+/** État des consentements d'un membre : courant résolu (par type) + historique. */
+export interface ConsentsView {
+  current: Record<ConsentType, { granted: boolean; at: string } | null>;
+  history: ConsentEventView[];
 }
 
 export class MemberService {
@@ -122,6 +141,37 @@ export class MemberService {
     return toView(record, periodDays, new Date());
   }
 
+  /** État des consentements (courant résolu + historique) — audite l'accès. */
+  async getConsents(id: string, actor: Actor): Promise<ConsentsView> {
+    await this.requireMember(id);
+    const events = await this.repo.listConsents(id);
+    await this.audit.record({
+      userId: actor.userId,
+      action: "CONSENT_READ",
+      resourceType: "member",
+      resourceId: id,
+      memberId: id,
+      ip: actor.ip,
+    });
+    return toConsentsView(events);
+  }
+
+  /** Ajoute un événement de consentement (append-only) et trace `CONSENT_CHANGE`. */
+  async addConsent(id: string, input: ConsentInput, actor: Actor): Promise<ConsentEventView> {
+    await this.requireMember(id);
+    const event = await this.repo.addConsent(id, input);
+    await this.audit.record({
+      userId: actor.userId,
+      action: "CONSENT_CHANGE",
+      resourceType: "member",
+      resourceId: id,
+      memberId: id,
+      ip: actor.ip,
+      metadata: { type: input.type, granted: input.granted },
+    });
+    return toConsentEventView(event);
+  }
+
   private async requireMember(id: string): Promise<MemberRecord> {
     const record = await this.repo.findById(id);
     if (!record) {
@@ -129,6 +179,28 @@ export class MemberService {
     }
     return record;
   }
+}
+
+function toConsentEventView(event: ConsentEventRecord): ConsentEventView {
+  return {
+    id: event.id,
+    type: event.type,
+    granted: event.granted,
+    createdAt: event.createdAt.toISOString(),
+  };
+}
+
+/** Résout le consentement courant par type (core) + sérialise l'historique. */
+function toConsentsView(events: ConsentEventRecord[]): ConsentsView {
+  const resolved = resolveConsents(
+    events.map((e) => ({ type: e.type, granted: e.granted, at: e.createdAt })),
+  );
+  const current = {} as Record<ConsentType, { granted: boolean; at: string } | null>;
+  for (const type of CONSENT_TYPES) {
+    const entry = resolved[type];
+    current[type] = entry ? { granted: entry.granted, at: entry.at.toISOString() } : null;
+  }
+  return { current, history: events.map(toConsentEventView) };
 }
 
 /** Sérialise un membre en vue API : dates ISO + statut **dérivé** de la période. */

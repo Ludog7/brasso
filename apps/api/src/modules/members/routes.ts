@@ -7,7 +7,12 @@ import { PrismaAuditRepository } from "../audit/repository.js";
 import { AuditService } from "../audit/service.js";
 import type { MemberRepository } from "./repository.js";
 import { PrismaMemberRepository } from "./repository.js";
-import { memberCreateSchema, memberListQuery, memberUpdateSchema } from "./schema.js";
+import {
+  consentInputSchema,
+  memberCreateSchema,
+  memberListQuery,
+  memberUpdateSchema,
+} from "./schema.js";
 import { type Actor, MemberService } from "./service.js";
 
 export interface MemberRoutesOptions {
@@ -57,4 +62,22 @@ export const membersRoutes: FastifyPluginAsync<MemberRoutesOptions> = async (app
     const body = memberUpdateSchema.parse(request.body);
     return { member: await service.update(id, body, actorOf(request)) };
   });
+
+  // Consentements historisés (M6-05) : lecture de l'état courant + historique.
+  app.get("/members/:id/consents", { config: app.rbac("membres", "read") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return service.getConsents(id, actorOf(request));
+  });
+
+  // Ajout d'un événement de consentement (append-only) : octroi ou retrait.
+  app.post(
+    "/members/:id/consents",
+    { config: app.rbac("membres", "update") },
+    async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const body = consentInputSchema.parse(request.body);
+      const event = await service.addConsent(id, body, actorOf(request));
+      return reply.code(201).send({ event });
+    },
+  );
 };

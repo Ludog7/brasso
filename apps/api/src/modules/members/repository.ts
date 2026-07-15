@@ -6,9 +6,15 @@
  * injectable pour un repository en mémoire dans les tests.
  */
 
-import type { AssociativeRole, MembershipStatus, Prisma, PrismaClient } from "@brasso/db";
+import type {
+  AssociativeRole,
+  ConsentType,
+  MembershipStatus,
+  Prisma,
+  PrismaClient,
+} from "@brasso/db";
 
-import type { MemberCreateInput, MemberUpdateInput } from "./schema.js";
+import type { ConsentInput, MemberCreateInput, MemberUpdateInput } from "./schema.js";
 
 /** Vue DB-agnostique d'un membre. */
 export interface MemberRecord {
@@ -42,6 +48,14 @@ export interface MemberListResult {
   total: number;
 }
 
+/** Un événement de consentement historisé (append-only, §3.4). */
+export interface ConsentEventRecord {
+  id: string;
+  type: ConsentType;
+  granted: boolean;
+  createdAt: Date;
+}
+
 /** Port d'accès aux membres (Prisma en prod, mémoire en test). */
 export interface MemberRepository {
   list(filters: MemberListFilters): Promise<MemberListResult>;
@@ -51,6 +65,10 @@ export interface MemberRepository {
   update(id: string, patch: MemberUpdateInput): Promise<MemberRecord>;
   /** Durée de validité d'une cotisation (jours) — `Settings.membershipPeriodDays`. */
   membershipPeriodDays(): Promise<number>;
+  /** Historique des consentements d'un membre, du plus ancien au plus récent. */
+  listConsents(memberId: string): Promise<ConsentEventRecord[]>;
+  /** Ajoute un événement de consentement (append-only). */
+  addConsent(memberId: string, input: ConsentInput): Promise<ConsentEventRecord>;
 }
 
 /** Adaptateur Prisma du module membres. */
@@ -124,5 +142,20 @@ export class PrismaMemberRepository implements MemberRepository {
   async membershipPeriodDays(): Promise<number> {
     const settings = await this.db.settings.findFirst({ select: { membershipPeriodDays: true } });
     return settings?.membershipPeriodDays ?? 365;
+  }
+
+  async listConsents(memberId: string): Promise<ConsentEventRecord[]> {
+    return this.db.memberConsent.findMany({
+      where: { memberId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, type: true, granted: true, createdAt: true },
+    });
+  }
+
+  async addConsent(memberId: string, input: ConsentInput): Promise<ConsentEventRecord> {
+    return this.db.memberConsent.create({
+      data: { memberId, type: input.type, granted: input.granted },
+      select: { id: true, type: true, granted: true, createdAt: true },
+    });
   }
 }
