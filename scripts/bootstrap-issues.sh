@@ -104,14 +104,14 @@ create_milestone "M7 — Hub caisse & affichage" "Webhooks SumUp/Zettle, mapping
 create_milestone "M8 — Durcissement & mise en prod" "E2E Playwright (parcours critiques), backups pg_dump + restauration testee, runbooks, perf tablette, REG-01/REG-02, calculateurs autonomes. Demo : installation from scratch + restauration backup reussie."
 
 # ---------------------------------------------------------------------------
-# 3) Issues filles depuis docs/issues/M0 → M5
+# 3) Issues filles depuis docs/issues/M0 → M6
 # ---------------------------------------------------------------------------
 find_issue() { # $1 = id ("M0-01") ou titre exact -> number|empty
   gh issue list --repo "$REPO" --state all --limit 300 --json number,title \
     --jq "map(select(.title==\"$1\" or (.title | startswith(\"$1 \")))) | .[0].number // empty" 2>/dev/null || true
 }
 log "Issues filles…"
-for ms in M0 M1 M2 M3 M4 M5; do
+for ms in M0 M1 M2 M3 M4 M5 M6; do
   for f in "$ISSUES_DIR/$ms"/*.md; do
     [ -e "$f" ] || continue
     id="$(get_id "$f")"; title="$(get_title "$f")"
@@ -143,7 +143,7 @@ build_sedscript() {
 }
 log "Résolution des dépendances…"
 SEDSCRIPT="$(build_sedscript)"
-for ms in M0 M1 M2 M3 M4 M5; do
+for ms in M0 M1 M2 M3 M4 M5 M6; do
   for f in "$ISSUES_DIR/$ms"/*.md; do
     [ -e "$f" ] || continue
     grep -q '{{M' "$f" || continue
@@ -161,7 +161,7 @@ done
 # ---------------------------------------------------------------------------
 # 5) Epics chapeau
 # ---------------------------------------------------------------------------
-checklist_for() { # $1 = M0…M5
+checklist_for() { # $1 = M0…M6
   for f in "$ISSUES_DIR/$1"/*.md; do
     [ -e "$f" ] || continue
     local id title num
@@ -175,7 +175,7 @@ checklist_for() { # $1 = M0…M5
   done
 }
 log "Epics…"
-for ms in M0 M1 M2 M3 M4 M5; do
+for ms in M0 M1 M2 M3 M4 M5 M6; do
   ef="$ISSUES_DIR/epics/$ms-epic.md"
   [ -e "$ef" ] || continue
   etitle="$(get_title "$ef")"; emilestone="$(fm_field "$ef" milestone)"
