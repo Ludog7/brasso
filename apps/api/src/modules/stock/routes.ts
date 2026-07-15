@@ -90,4 +90,17 @@ export const stockRoutes: FastifyPluginAsync<StockRoutesOptions> = async (app, o
     const lines = await service.applyInventory(body, request.user?.id ?? null);
     return { lines };
   });
+
+  // Déduction à l'ensemencement (M5-05, démo + rattrapage) : consomme/rejoue les
+  // réservations d'un batch ensemencé. Idempotent (409 si < EN_FERMENTATION).
+  // La même consommation est aussi déclenchée automatiquement à l'entrée en
+  // EN_FERMENTATION (changeStatus M3-06 + clôture Jour J M4-05), dans leur transaction.
+  app.post(
+    "/batches/:id/stock/consume",
+    { config: app.rbac("stocks", "update") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      return service.consumeForBatch(id, request.user?.id ?? null);
+    },
+  );
 };

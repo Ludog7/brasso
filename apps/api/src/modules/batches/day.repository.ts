@@ -10,6 +10,8 @@
 import type { DayPhase, MeasureType, PlanEquipment } from "@brasso/core";
 import type { BatchStatus, CorrectionType, Prisma, PrismaClient } from "@brasso/db";
 
+import { consumeReservationsForBatch, prismaConsumePort } from "../stock/consume.js";
+
 /** Contexte nécessaire pour démarrer une session : statut + snapshot + profil. */
 export interface DayStartContext {
   status: BatchStatus;
@@ -82,6 +84,8 @@ export interface DayTransitionData {
   finished: boolean;
   measure?: MeasureEffect;
   deviation?: DeviationEffect;
+  /** Auteur de la clôture — pose les mouvements `PRODUCTION` de consommation (M5-05). */
+  actorId: string | null;
 }
 
 /** Entrée déjà rejouée (`DayEventLog`) — sert de garde d'idempotence (M4-06). */
@@ -117,6 +121,8 @@ export interface DaySyncCommit {
   measures: MeasureEffect[];
   deviations: DeviationEffect[];
   eventLogs: DayEventLogEntry[];
+  /** Auteur de la clôture — pose les mouvements `PRODUCTION` de consommation (M5-05). */
+  actorId: string | null;
 }
 
 /**
@@ -276,6 +282,9 @@ export class PrismaBatchDayRepository implements DayRepository {
           where: { id: batchId },
           data: { status: "EN_FERMENTATION", fermentedAt: new Date() },
         });
+        // Ensemencement par clôture Jour J : consommation dans la même transaction
+        // (M5-05, idempotente vis-à-vis d'un éventuel changeStatus antérieur).
+        await consumeReservationsForBatch(prismaConsumePort(tx), batchId, data.actorId);
       }
     });
   }
@@ -339,6 +348,8 @@ export class PrismaBatchDayRepository implements DayRepository {
             where: { id: batchId },
             data: { status: "EN_FERMENTATION", fermentedAt: new Date() },
           });
+          // Ensemencement par clôture via rejeu offline : consommation atomique (M5-05).
+          await consumeReservationsForBatch(prismaConsumePort(tx), batchId, commit.actorId);
         }
       }
       if (commit.eventLogs.length > 0) {

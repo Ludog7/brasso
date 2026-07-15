@@ -169,7 +169,11 @@ export class BatchService {
    * Jour J). Transition illégale → 409 `INVALID_TRANSITION`. Passer à `ANNULE`
    * libère les réservations (même effet que `cancel`).
    */
-  async changeStatus(id: string, target: BatchStatus): Promise<BatchDetailView> {
+  async changeStatus(
+    id: string,
+    target: BatchStatus,
+    actorId: string | null = null,
+  ): Promise<BatchDetailView> {
     const batch = await this.get(id);
     if (!isTransitionAllowed(batch.status, target)) {
       throw new InvalidTransitionError(id, batch.status, target);
@@ -177,7 +181,7 @@ export class BatchService {
     if (target === "ANNULE") {
       return this.repo.cancel(id);
     }
-    return this.repo.transition(id, target);
+    return this.repo.transition(id, target, actorId);
   }
 
   /** Enregistre une mesure append-only sur un batch existant (404 sinon). */

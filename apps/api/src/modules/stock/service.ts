@@ -6,7 +6,9 @@
  */
 
 import { evaluateReorder } from "@brasso/core";
+import type { BatchStatus } from "@brasso/db";
 
+import type { ConsumeResult } from "./consume.js";
 import type {
   CatalogItemRecord,
   InventoryLineResult,
@@ -46,6 +48,33 @@ export class CatalogItemKindImmutableError extends Error {
     this.name = "CatalogItemKindImmutableError";
   }
 }
+
+/** Batch introuvable (consommation de stock) → 404. */
+export class BatchNotFoundError extends Error {
+  readonly statusCode = 404;
+  readonly code = "BATCH_NOT_FOUND";
+  constructor(id: string) {
+    super(`Batch ${id} introuvable`);
+    this.name = "BatchNotFoundError";
+  }
+}
+
+/** Consommation refusée : le batch n'est pas encore ensemencé (`< EN_FERMENTATION`) → 409. */
+export class BatchNotSeededError extends Error {
+  readonly statusCode = 409;
+  readonly code = "BATCH_NOT_SEEDED";
+  constructor(id: string, status: string) {
+    super(`Le batch ${id} (${status}) n'est pas encore ensemencé — stock non consommable`);
+    this.name = "BatchNotSeededError";
+  }
+}
+
+/** Statuts à partir desquels le batch est ensemencé (réservations consommables). */
+const SEEDED_STATUSES: readonly BatchStatus[] = [
+  "EN_FERMENTATION",
+  "EN_CONDITIONNEMENT",
+  "TERMINE",
+];
 
 /** Article + agrégats + indicateur de seuil (disponible net, franchissement). */
 export interface StockItemView extends StockItemAggregate {
@@ -151,5 +180,21 @@ export class StockService {
       }
     }
     return this.repo.applyInventory(body.counts, userId);
+  }
+
+  /**
+   * Déclenche/rejoue la consommation des réservations d'un batch ensemencé
+   * (endpoint dédié M5-05, démo + rattrapage). Idempotent. 404 batch absent ;
+   * 409 si le batch n'est pas encore en `EN_FERMENTATION` (ou au-delà).
+   */
+  async consumeForBatch(batchId: string, actorId: string | null): Promise<ConsumeResult> {
+    const status = await this.repo.getBatchStatus(batchId);
+    if (status === null) {
+      throw new BatchNotFoundError(batchId);
+    }
+    if (!SEEDED_STATUSES.includes(status)) {
+      throw new BatchNotSeededError(batchId, status);
+    }
+    return this.repo.consumeForBatch(batchId, actorId);
   }
 }

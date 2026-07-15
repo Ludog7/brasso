@@ -11,6 +11,7 @@
 
 import { deriveStockLevel } from "@brasso/core";
 import type {
+  BatchStatus,
   CatalogKind,
   IngredientCategory,
   Prisma,
@@ -19,6 +20,8 @@ import type {
   StockUnit,
 } from "@brasso/db";
 
+import type { ConsumeResult } from "./consume.js";
+import { consumeReservationsForBatch, prismaConsumePort } from "./consume.js";
 import type { CatalogItemInput, CatalogItemUpdate, StockLotInput } from "./schema.js";
 
 /** Vue DB-agnostique d'un article de catalogue (champs de gestion). */
@@ -147,6 +150,10 @@ export interface StockRepository {
     lines: InventoryCountLine[],
     userId: string | null,
   ): Promise<InventoryLineResult[]>;
+  /** Statut courant d'un batch (garde 404/409 de la consommation) ; `null` si absent. */
+  getBatchStatus(batchId: string): Promise<BatchStatus | null>;
+  /** Consomme les réservations d'un batch à l'ensemencement (transactionnel, idempotent). */
+  consumeForBatch(batchId: string, actorId: string | null): Promise<ConsumeResult>;
 }
 
 /** Nombre de mouvements récents remontés dans le détail d'un article. */
@@ -423,5 +430,19 @@ export class PrismaStockRepository implements StockRepository {
       }
       return results;
     });
+  }
+
+  async getBatchStatus(batchId: string): Promise<BatchStatus | null> {
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+      select: { status: true },
+    });
+    return batch?.status ?? null;
+  }
+
+  consumeForBatch(batchId: string, actorId: string | null): Promise<ConsumeResult> {
+    return this.prisma.$transaction((tx) =>
+      consumeReservationsForBatch(prismaConsumePort(tx), batchId, actorId),
+    );
   }
 }
