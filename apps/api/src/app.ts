@@ -16,6 +16,8 @@ import { batchesRoutes } from "./modules/batches/routes.js";
 import type { EquipmentRepository } from "./modules/equipment/repository.js";
 import { equipmentRoutes } from "./modules/equipment/routes.js";
 import { healthRoutes } from "./modules/health/routes.js";
+import type { MemberRepository } from "./modules/members/repository.js";
+import { membersRoutes } from "./modules/members/routes.js";
 import type { RecipeRepository } from "./modules/recipes/repository.js";
 import { recipesRoutes } from "./modules/recipes/routes.js";
 import type { CatalogRepository } from "./modules/referentials/repository.js";
@@ -46,6 +48,8 @@ export interface BuildAppOptions {
   stockRepository?: StockRepository;
   /** Repository du journal d'audit injecté (tests) ; sinon adossé à Prisma. */
   auditRepository?: AuditRepository;
+  /** Repository membres injecté (tests) ; sinon adossé à Prisma. */
+  memberRepository?: MemberRepository;
 }
 
 /**
@@ -87,9 +91,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
   await app.register(stockRoutes, { prefix: "/api", repository: opts.stockRepository });
 
-  // Journal d'audit (M6-03) : consommé plus tard par les modules membres/RGPD/
-  // rapprochement (via `AuditService.record`) pour tracer les actions sensibles.
+  // Journal d'audit (M6-03) : consommé par les modules membres/RGPD/rapprochement
+  // (via `AuditService.record`) pour tracer les actions sensibles.
   await app.register(auditRoutes, { prefix: "/api", repository: opts.auditRepository });
+  // Fichier membres (M6-04) : partage le même repository d'audit.
+  await app.register(membersRoutes, {
+    prefix: "/api",
+    repository: opts.memberRepository,
+    auditRepository: opts.auditRepository,
+  });
 
   return app;
 }
