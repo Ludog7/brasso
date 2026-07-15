@@ -62,3 +62,6 @@ export * from "./water/index.js";
 
 // Calculs de stock purs — niveau dérivé, ajustement au volume réel, seuil de réappro (M5-01, §3.3).
 export * from "./stock/index.js";
+
+// Helpers purs membres & RGPD — statut dérivé, consentements, anonymisation, export (M6-02, §3.4).
+export * from "./members/index.js";

@@ -7,6 +7,7 @@ export * from "./day.js";
 export * from "./enums.js";
 export * from "./equipment.js";
 export * from "./measurement.js";
+export * from "./member.js";
 export * from "./recipe.js";
 export * from "./recipeParts.js";
 export * from "./recipeSchema.js";

@@ -95,6 +95,21 @@ export const reservationStatusSchema = z.enum(["RESERVED", "CONSUMED", "RELEASED
  */
 export const storageModeSchema = z.enum(["cold", "ambient"]);
 
+/** Statut de cotisation d'un membre (Prisma `MembershipStatus`, §3.4). */
+export const membershipStatusSchema = z.enum(["A_JOUR", "EN_RETARD"]);
+
+/** Type de consentement RGPD historisé (Prisma `ConsentType`, §3.4). */
+export const consentTypeSchema = z.enum(["COMMUNICATION", "PHOTOS", "NOTIFICATIONS_LEGALES"]);
+
+/** Fonction associative d'un membre (Prisma `AssociativeRole`, ≠ rôles RBAC §3.5). */
+export const associativeRoleSchema = z.enum([
+  "ADHERENT",
+  "BRASSEUR",
+  "CA",
+  "TRESORIER",
+  "REFERENT_RGPD",
+]);
+
 export type RecipeEngine = z.infer<typeof recipeEngineSchema>;
 export type RecipeStatus = z.infer<typeof recipeStatusSchema>;
 export type IngredientCategory = z.infer<typeof ingredientCategorySchema>;
@@ -106,3 +121,6 @@ export type CatalogKind = z.infer<typeof catalogKindSchema>;
 export type StockUnit = z.infer<typeof stockUnitSchema>;
 export type StockMovementReason = z.infer<typeof stockMovementReasonSchema>;
 export type ReservationStatus = z.infer<typeof reservationStatusSchema>;
+export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
+export type ConsentType = z.infer<typeof consentTypeSchema>;
+export type AssociativeRole = z.infer<typeof associativeRoleSchema>;
