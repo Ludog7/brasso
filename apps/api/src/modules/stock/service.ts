@@ -9,13 +9,23 @@ import { evaluateReorder } from "@brasso/core";
 
 import type {
   CatalogItemRecord,
+  InventoryLineResult,
+  MovementCreatedResult,
+  MovementListResult,
+  PaginationInput,
   StockItemAggregate,
   StockItemListFilters,
   StockLotView,
   StockMovementView,
   StockRepository,
 } from "./repository.js";
-import type { CatalogItemInput, CatalogItemUpdate, StockLotInput } from "./schema.js";
+import type {
+  CatalogItemInput,
+  CatalogItemUpdate,
+  InventoryBody,
+  StockLotInput,
+  StockMovementBody,
+} from "./schema.js";
 
 /** Article introuvable → 404 (lu par l'error handler global). */
 export class CatalogItemNotFoundError extends Error {
@@ -103,5 +113,43 @@ export class StockService {
       throw new CatalogItemNotFoundError(catalogItemId);
     }
     return this.repo.createLot(catalogItemId, body);
+  }
+
+  /** Enregistre un mouvement manuel (append-only) et renvoie le nouveau niveau. */
+  async createMovement(
+    body: StockMovementBody,
+    userId: string | null,
+  ): Promise<MovementCreatedResult> {
+    const existing = await this.repo.findItemById(body.catalogItemId);
+    if (!existing) {
+      throw new CatalogItemNotFoundError(body.catalogItemId);
+    }
+    return this.repo.createMovement({ ...body, userId });
+  }
+
+  async listMovements(
+    catalogItemId: string,
+    pagination: PaginationInput,
+  ): Promise<MovementListResult> {
+    const existing = await this.repo.findItemById(catalogItemId);
+    if (!existing) {
+      throw new CatalogItemNotFoundError(catalogItemId);
+    }
+    return this.repo.listMovements(catalogItemId, pagination);
+  }
+
+  /**
+   * Applique un inventaire périodique : chaque écart génère un mouvement
+   * `INVENTORY` (append-only, transactionnel). Les articles inconnus → 404
+   * avant toute écriture.
+   */
+  async applyInventory(body: InventoryBody, userId: string | null): Promise<InventoryLineResult[]> {
+    for (const line of body.counts) {
+      const existing = await this.repo.findItemById(line.catalogItemId);
+      if (!existing) {
+        throw new CatalogItemNotFoundError(line.catalogItemId);
+      }
+    }
+    return this.repo.applyInventory(body.counts, userId);
   }
 }

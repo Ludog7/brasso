@@ -88,6 +88,48 @@ export interface StockItemListResult {
   total: number;
 }
 
+/** Insertion d'un mouvement (registre append-only) — `userId` = auteur tracé. */
+export interface StockMovementInsert {
+  catalogItemId: string;
+  delta: number;
+  reason: StockMovementReason;
+  stockLotId?: string | null;
+  note?: string | null;
+  userId: string | null;
+}
+
+/** Mouvement inséré + nouveau niveau dérivé après insertion. */
+export interface MovementCreatedResult {
+  movement: StockMovementView;
+  level: number;
+}
+
+/** Une ligne de comptage d'inventaire à appliquer. */
+export interface InventoryCountLine {
+  catalogItemId: string;
+  countedQuantity: number;
+  note?: string;
+}
+
+/** Résultat par ligne d'inventaire : `movementId` absent si aucun écart (no-op). */
+export interface InventoryLineResult {
+  catalogItemId: string;
+  previousLevel: number;
+  countedQuantity: number;
+  delta: number;
+  movementId?: string;
+}
+
+export interface PaginationInput {
+  limit: number;
+  offset: number;
+}
+
+export interface MovementListResult {
+  movements: StockMovementView[];
+  total: number;
+}
+
 export interface StockRepository {
   listItems(filters: StockItemListFilters): Promise<StockItemListResult>;
   findItemDetail(id: string): Promise<StockItemDetail | null>;
@@ -96,6 +138,15 @@ export interface StockRepository {
   createItem(data: CatalogItemInput): Promise<CatalogItemRecord>;
   updateItem(id: string, data: CatalogItemUpdate): Promise<CatalogItemRecord>;
   createLot(catalogItemId: string, data: StockLotInput): Promise<StockLotView>;
+  /** Insère un mouvement et renvoie le nouveau niveau dérivé. */
+  createMovement(input: StockMovementInsert): Promise<MovementCreatedResult>;
+  /** Registre paginé d'un article (ordre `createdAt` desc). */
+  listMovements(catalogItemId: string, pagination: PaginationInput): Promise<MovementListResult>;
+  /** Applique un inventaire (transactionnel) : un mouvement `INVENTORY` par écart. */
+  applyInventory(
+    lines: InventoryCountLine[],
+    userId: string | null,
+  ): Promise<InventoryLineResult[]>;
 }
 
 /** Nombre de mouvements récents remontés dans le détail d'un article. */
@@ -118,6 +169,27 @@ const ITEM_SELECT = {
 /** Normalise un `attributes` validé vers l'entrée JSON Prisma (`null`/`undefined` = inchangé). */
 function toJson(value: unknown): Prisma.InputJsonValue | undefined {
   return value == null ? undefined : (value as Prisma.InputJsonValue);
+}
+
+/** Projette un `StockMovement` Prisma vers sa vue DB-agnostique. */
+function toMovementView(m: {
+  id: string;
+  delta: number;
+  reason: StockMovementReason;
+  stockLotId: string | null;
+  batchId: string | null;
+  note: string | null;
+  createdAt: Date;
+}): StockMovementView {
+  return {
+    id: m.id,
+    delta: m.delta,
+    reason: m.reason,
+    stockLotId: m.stockLotId,
+    batchId: m.batchId,
+    note: m.note,
+    createdAt: m.createdAt,
+  };
 }
 
 export class PrismaStockRepository implements StockRepository {
@@ -212,15 +284,7 @@ export class PrismaStockRepository implements StockRepository {
         unitCostCents: lot.unitCostCents,
         createdAt: lot.createdAt,
       })),
-      recentMovements: movements.slice(0, RECENT_MOVEMENTS).map((m) => ({
-        id: m.id,
-        delta: m.delta,
-        reason: m.reason,
-        stockLotId: m.stockLotId,
-        batchId: m.batchId,
-        note: m.note,
-        createdAt: m.createdAt,
-      })),
+      recentMovements: movements.slice(0, RECENT_MOVEMENTS).map(toMovementView),
     };
   }
 
@@ -281,5 +345,83 @@ export class PrismaStockRepository implements StockRepository {
       unitCostCents: lot.unitCostCents,
       createdAt: lot.createdAt,
     };
+  }
+
+  createMovement(input: StockMovementInsert): Promise<MovementCreatedResult> {
+    // Insert + relecture du niveau dans la même transaction (cohérence lecture).
+    return this.prisma.$transaction(async (tx) => {
+      const movement = await tx.stockMovement.create({
+        data: {
+          catalogItemId: input.catalogItemId,
+          delta: input.delta,
+          reason: input.reason,
+          stockLotId: input.stockLotId ?? null,
+          note: input.note ?? null,
+          userId: input.userId,
+        },
+      });
+      const agg = await tx.stockMovement.aggregate({
+        where: { catalogItemId: input.catalogItemId },
+        _sum: { delta: true },
+      });
+      return { movement: toMovementView(movement), level: agg._sum.delta ?? 0 };
+    });
+  }
+
+  async listMovements(
+    catalogItemId: string,
+    { limit, offset }: PaginationInput,
+  ): Promise<MovementListResult> {
+    const where = { catalogItemId };
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.stockMovement.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.stockMovement.count({ where }),
+    ]);
+    return { movements: rows.map(toMovementView), total };
+  }
+
+  applyInventory(
+    lines: InventoryCountLine[],
+    userId: string | null,
+  ): Promise<InventoryLineResult[]> {
+    // Atomique : toutes les lignes ou aucune. Le niveau est relu ligne à ligne
+    // (des lignes visant le même article se recalent séquentiellement).
+    return this.prisma.$transaction(async (tx) => {
+      const results: InventoryLineResult[] = [];
+      for (const line of lines) {
+        const agg = await tx.stockMovement.aggregate({
+          where: { catalogItemId: line.catalogItemId },
+          _sum: { delta: true },
+        });
+        const previousLevel = agg._sum.delta ?? 0;
+        const delta = line.countedQuantity - previousLevel;
+        let movementId: string | undefined;
+        if (delta !== 0) {
+          const movement = await tx.stockMovement.create({
+            data: {
+              catalogItemId: line.catalogItemId,
+              delta,
+              reason: "INVENTORY",
+              note: line.note ?? null,
+              userId,
+            },
+          });
+          movementId = movement.id;
+        }
+        results.push({
+          catalogItemId: line.catalogItemId,
+          previousLevel,
+          countedQuantity: line.countedQuantity,
+          delta,
+          ...(movementId ? { movementId } : {}),
+        });
+      }
+      return results;
+    });
   }
 }
