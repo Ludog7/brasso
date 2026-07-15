@@ -6,6 +6,7 @@
  * injectable pour un repository en mémoire dans les tests.
  */
 
+import type { AnonymizedIdentity, ContributionRecord } from "@brasso/core";
 import type {
   AssociativeRole,
   ConsentType,
@@ -15,6 +16,8 @@ import type {
 } from "@brasso/db";
 
 import type { ConsentInput, MemberCreateInput, MemberUpdateInput } from "./schema.js";
+
+export type { ContributionRecord } from "@brasso/core";
 
 /** Vue DB-agnostique d'un membre. */
 export interface MemberRecord {
@@ -69,6 +72,14 @@ export interface MemberRepository {
   listConsents(memberId: string): Promise<ConsentEventRecord[]>;
   /** Ajoute un événement de consentement (append-only). */
   addConsent(memberId: string, input: ConsentInput): Promise<ConsentEventRecord>;
+  /** Cotisations rapprochées du membre (transactions `MEMBERSHIP`), pour l'export RGPD. */
+  listContributions(memberId: string): Promise<ContributionRecord[]>;
+  /**
+   * Anonymise un membre (pseudonymisation §3.4) : applique le patch d'identité et
+   * **délie** le compte `User` associé. Transactionnel. Conserve `memberNumber`,
+   * `membership`, `roles` et tous les agrégats/audit (scalaires sans FK).
+   */
+  anonymize(id: string, patch: AnonymizedIdentity): Promise<MemberRecord>;
 }
 
 /** Adaptateur Prisma du module membres. */
@@ -157,5 +168,37 @@ export class PrismaMemberRepository implements MemberRepository {
       data: { memberId, type: input.type, granted: input.granted },
       select: { id: true, type: true, granted: true, createdAt: true },
     });
+  }
+
+  async listContributions(memberId: string): Promise<ContributionRecord[]> {
+    const rows = await this.db.externalTransaction.findMany({
+      where: { memberId, kind: "MEMBERSHIP" },
+      orderBy: { occurredAt: "asc" },
+      select: { amountCents: true, currency: true, occurredAt: true, externalId: true },
+    });
+    return rows.map((r) => ({
+      amountCents: r.amountCents,
+      currency: r.currency,
+      occurredAt: r.occurredAt,
+      reference: r.externalId,
+    }));
+  }
+
+  async anonymize(id: string, patch: AnonymizedIdentity): Promise<MemberRecord> {
+    const [member] = await this.db.$transaction([
+      this.db.member.update({
+        where: { id },
+        data: {
+          firstName: patch.firstName,
+          lastName: patch.lastName,
+          email: patch.email,
+          phone: patch.phone,
+          address: patch.address,
+          birthDate: patch.birthDate,
+        },
+      }),
+      this.db.user.updateMany({ where: { memberId: id }, data: { memberId: null } }),
+    ]);
+    return member;
   }
 }

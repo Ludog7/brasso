@@ -80,4 +80,20 @@ export const membersRoutes: FastifyPluginAsync<MemberRoutesOptions> = async (app
       return reply.code(201).send({ event });
     },
   );
+
+  // RGPD — droit d'accès : export du dossier complet (réservé au rôle `rgpd`).
+  app.get("/members/:id/export", { config: app.rbac("membres", "export") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return service.exportDossier(id, actorOf(request));
+  });
+
+  // RGPD — droit à l'effacement : anonymisation irréversible (réservée à `rgpd`).
+  app.post(
+    "/members/:id/anonymize",
+    { config: app.rbac("membres", "anonymize") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      return { member: await service.anonymize(id, actorOf(request)) };
+    },
+  );
 };
