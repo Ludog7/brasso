@@ -16,6 +16,7 @@ import { RecipeDetailPage } from "@/routes/recipes/RecipeDetailPage";
 import { RecipeEditorPage } from "@/routes/recipes/RecipeEditorPage";
 import { RecipesListPage } from "@/routes/recipes/RecipesListPage";
 import { RequireAuth } from "@/routes/RequireAuth";
+import { StockPage } from "@/routes/stock/StockPage";
 import { Button } from "@/ui/button";
 
 function Splash({ children }: { children: ReactNode }) {
@@ -59,6 +60,7 @@ export function App() {
         <Route path="/recipes/:id" element={<RecipeDetailPage />} />
         <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
         <Route path="/equipment" element={<EquipmentListPage />} />
+        <Route path="/stock" element={<StockPage />} />
         <Route path="/equipment/new" element={<NewEquipmentPage />} />
         <Route path="/equipment/:id/edit" element={<EditEquipmentPage />} />
         <Route path="/batches/new/:recipeId" element={<PlanBatchPage />} />
