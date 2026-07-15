@@ -1,4 +1,4 @@
-import type { BatchStatus, MeasureType } from "@/lib/api";
+import type { BatchStatus, MeasureType, ReservationStatus } from "@/lib/api";
 import type { BadgeProps } from "@/ui/badge";
 
 export const STATUS_LABELS: Record<BatchStatus, string> = {
@@ -37,6 +37,20 @@ export const MEASURE_DEFAULT_UNIT: Record<MeasureType, string> = {
 };
 
 export const MEASURE_TYPES: MeasureType[] = ["GRAVITY", "TEMPERATURE", "PH", "VOLUME", "OTHER"];
+
+/** Statut d'une réservation de stock (M5-08) : réservé (planifié) → déduit (consommé). */
+export const RESERVATION_STATUS_LABELS: Record<ReservationStatus, string> = {
+  RESERVED: "Réservé",
+  CONSUMED: "Déduit",
+  RELEASED: "Libéré",
+};
+
+/** Ton de badge : seul `CONSUMED` (déduit) est « vert » ; réservé = neutre en attente. */
+export const RESERVATION_STATUS_TONE: Record<ReservationStatus, NonNullable<BadgeProps["tone"]>> = {
+  RESERVED: "accent",
+  CONSUMED: "success",
+  RELEASED: "muted",
+};
 
 /** Libellés des étapes retenues dans le plan de fermentation. */
 export const FERMENTATION_STEP_LABELS: Record<string, string> = {

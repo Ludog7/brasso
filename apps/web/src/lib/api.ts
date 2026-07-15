@@ -660,6 +660,30 @@ export interface MeasureCreateInput {
   phase?: string;
 }
 
+/**
+ * Base de valorisation du coût (M5-06) : `planned` = sur les réservations (avant
+ * ensemencement) ; `consumed` = sur les quantités réellement consommées au volume réel.
+ */
+export type CostBasis = "planned" | "consumed";
+
+/**
+ * Coût de revient **estimé** d'un batch (miroir de `BatchCostView`, M5-06). Montants
+ * en **centimes entiers** (unité interne) ; base = coûts de référence catalogue.
+ */
+export interface BatchCost {
+  ingredientsCents: number;
+  conditioningCents: number;
+  bulkCents: number;
+  totalCents: number;
+  /** Coût au litre ; `null` si le volume du batch est indisponible. */
+  costPerLiterCents: number | null;
+  /** Coût à l'unité conditionnée ; `null` si le nombre d'unités est inconnu. */
+  costPerPackagedUnitCents: number | null;
+  /** Nombre de lignes à coût inconnu (comptées 0) → total sous-estimé. */
+  missingCostLines: number;
+  basis: CostBasis;
+}
+
 export const batchesApi = {
   get: (id: string): Promise<BatchDetail> =>
     request<{ batch: BatchDetail }>(`/api/batches/${id}`).then((r) => r.batch),
@@ -692,6 +716,10 @@ export const batchesApi = {
       method: "POST",
       body: JSON.stringify({ status }),
     }).then((r) => r.batch),
+
+  /** Coût de revient estimé du batch (M5-06) : total, coût au litre, répartition + base. */
+  cost: (id: string): Promise<BatchCost> =>
+    request<{ cost: BatchCost }>(`/api/batches/${id}/cost`).then((r) => r.cost),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ export const batchKeys = {
   all: ["batches"] as const,
   detail: (id: string) => ["batches", "detail", id] as const,
   measures: (id: string) => ["batches", "measures", id] as const,
+  cost: (id: string) => ["batches", "cost", id] as const,
 };
 
 /** Détail d'un batch (numéro, statut, réservations). */
@@ -19,6 +20,15 @@ export function useBatch(id: string | undefined) {
   return useQuery({
     queryKey: batchKeys.detail(id ?? ""),
     queryFn: () => batchesApi.get(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+/** Coût de revient estimé du batch (M5-08) : total, coût au litre, répartition, base. */
+export function useBatchCost(id: string | undefined) {
+  return useQuery({
+    queryKey: batchKeys.cost(id ?? ""),
+    queryFn: () => batchesApi.cost(id as string),
     enabled: Boolean(id),
   });
 }
