@@ -266,6 +266,7 @@ export class BatchDayService {
       finished,
       measure: measureEffect(event, phase, userId),
       deviation: deviationEffect(result.deviation, userId),
+      actorId: userId,
     });
 
     const batchStatus: BatchStatus = finished ? "EN_FERMENTATION" : session.batchStatus;
@@ -369,6 +370,7 @@ export class BatchDayService {
       measures,
       deviations,
       eventLogs,
+      actorId: userId,
     });
 
     const batchStatus: BatchStatus = finished ? "EN_FERMENTATION" : session.batchStatus;

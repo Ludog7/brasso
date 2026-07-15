@@ -10,6 +10,8 @@
 
 import type { BatchStatus, MeasureType, Prisma, PrismaClient, ReservationStatus } from "@brasso/db";
 
+import { consumeReservationsForBatch, prismaConsumePort } from "../stock/consume.js";
+
 /** Réservation de stock d'un batch (vue). L'unité est celle du `CatalogItem`. */
 export interface ReservationView {
   id: string;
@@ -106,8 +108,10 @@ export interface BatchRepository {
   /**
    * Applique une transition de statut simple (hors state machine Jour J) et
    * horodate le jalon correspondant. Le service a déjà validé la légalité.
+   * L'entrée en `EN_FERMENTATION` **consomme** les réservations du batch (M5-05)
+   * dans la même transaction ; `actorId` = auteur des mouvements `PRODUCTION`.
    */
-  transition(id: string, status: BatchStatus): Promise<BatchDetailView>;
+  transition(id: string, status: BatchStatus, actorId?: string | null): Promise<BatchDetailView>;
 }
 
 const SUMMARY_SELECT = {
@@ -240,11 +244,21 @@ export class PrismaBatchRepository implements BatchRepository {
     });
   }
 
-  transition(id: string, status: BatchStatus): Promise<BatchDetailView> {
-    return this.prisma.batch.update({
-      where: { id },
-      data: { status, ...milestonePatch(status, new Date()) },
-      select: DETAIL_SELECT,
+  transition(
+    id: string,
+    status: BatchStatus,
+    actorId: string | null = null,
+  ): Promise<BatchDetailView> {
+    const patch = { status, ...milestonePatch(status, new Date()) };
+    if (status !== "EN_FERMENTATION") {
+      return this.prisma.batch.update({ where: { id }, data: patch, select: DETAIL_SELECT });
+    }
+    // Ensemencement : passage EN_FERMENTATION + consommation des réservations,
+    // atomiquement (M5-05). La consommation est idempotente (re-lecture après).
+    return this.prisma.$transaction(async (tx) => {
+      await tx.batch.update({ where: { id }, data: patch });
+      await consumeReservationsForBatch(prismaConsumePort(tx), id, actorId);
+      return tx.batch.findUniqueOrThrow({ where: { id }, select: DETAIL_SELECT });
     });
   }
 

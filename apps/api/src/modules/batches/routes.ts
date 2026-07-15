@@ -77,6 +77,6 @@ export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (ap
   app.post("/batches/:id/status", { config: app.rbac("recettes", "update") }, async (request) => {
     const { id } = idParams.parse(request.params);
     const { status } = statusChangeBody.parse(request.body);
-    return { batch: await service.changeStatus(id, status) };
+    return { batch: await service.changeStatus(id, status, request.user?.id ?? null) };
   });
 };
