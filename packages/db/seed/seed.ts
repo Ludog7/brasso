@@ -10,7 +10,7 @@
 // une table — comptées ici pour l'observabilité.
 
 import { hash } from "@node-rs/argon2";
-import { CatalogKind, Prisma, PrismaClient } from "@prisma/client";
+import { CatalogKind, ExternalProviderKind, Prisma, PrismaClient } from "@prisma/client";
 
 import { BJCP_STYLES } from "./data/bjcp-styles.js";
 import { CATALOG_ITEMS } from "./data/catalog.js";
@@ -48,6 +48,34 @@ async function seedRoles(): Promise<void> {
       where: { key: role.key },
       create: { id: role.id, key: role.key, label: role.label },
       update: { label: role.label },
+    });
+  }
+}
+
+/**
+ * Fournisseurs externes (M6-07) : amorce le provider **HelloAsso** pour l'ingestion
+ * des cotisations par webhook. Upsert par la clé naturelle `(kind, label)`. Le
+ * secret de signature n'est **jamais** en base : `webhookSecretRef` ne porte que le
+ * **nom** de la variable d'environnement (§6). Fondation réutilisée par M7.
+ */
+async function seedProviders(): Promise<void> {
+  const providers = [
+    {
+      kind: ExternalProviderKind.HELLOASSO,
+      label: "HelloAsso",
+      webhookSecretRef: "HELLOASSO_WEBHOOK_SECRET",
+    },
+  ] as const;
+  for (const p of providers) {
+    await prisma.externalProvider.upsert({
+      where: { kind_label: { kind: p.kind, label: p.label } },
+      create: {
+        kind: p.kind,
+        label: p.label,
+        webhookSecretRef: p.webhookSecretRef,
+        isActive: true,
+      },
+      update: { webhookSecretRef: p.webhookSecretRef, isActive: true },
     });
   }
 }
@@ -115,14 +143,16 @@ async function main(): Promise<void> {
 
   await seedSettings();
   await seedRoles();
+  await seedProviders();
   await seedCatalog();
   const adminSeeded = await seedAdminUser();
 
   // Critère observable (DoD) : comptages sur les tables amorcées.
-  const [settingsCount, roleCount, userCount] = await Promise.all([
+  const [settingsCount, roleCount, userCount, providerCount] = await Promise.all([
     prisma.settings.count(),
     prisma.role.count(),
     prisma.user.count(),
+    prisma.externalProvider.count(),
   ]);
   const catalogByKind = await prisma.catalogItem.groupBy({
     by: ["kind"],
@@ -137,6 +167,7 @@ async function main(): Promise<void> {
     console.log(`   • Catalogue ${kind.padEnd(14)}: ${row?._count._all ?? 0}`);
   }
   console.log(`   • Styles BJCP  : ${BJCP_STYLES.length} (référence statique)`);
+  console.log(`   • Providers    : ${providerCount}`);
   console.log(`   • Utilisateurs : ${userCount}${adminSeeded ? " (admin dev inclus)" : ""}`);
 }
 
