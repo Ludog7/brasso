@@ -65,6 +65,8 @@ export interface WebhookIngestInput {
 export interface WebhookIngestResult {
   status: "created" | "duplicate";
   transactionId: string;
+  /** Email du payeur extrait du payload (auto-rapprochement M6-08, post-traitement). */
+  payerEmail: string | null;
 }
 
 export class WebhookService {
@@ -106,7 +108,7 @@ export class WebhookService {
 
     const existing = await this.repo.findTransaction(provider.id, normalized.externalId);
     if (existing) {
-      return { status: "duplicate", transactionId: existing.id };
+      return { status: "duplicate", transactionId: existing.id, payerEmail: normalized.payerEmail };
     }
 
     const created = await this.repo.insertTransaction({
@@ -118,6 +120,6 @@ export class WebhookService {
       occurredAt: normalized.occurredAt,
       rawPayload: input.payload as Prisma.InputJsonValue,
     });
-    return { status: "created", transactionId: created.id };
+    return { status: "created", transactionId: created.id, payerEmail: normalized.payerEmail };
   }
 }

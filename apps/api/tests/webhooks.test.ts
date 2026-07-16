@@ -6,12 +6,40 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
+import type { TransactionRepository } from "../src/modules/transactions/repository.js";
 import type {
   ExternalTransactionInsert,
   WebhookProviderRecord,
   WebhookRepository,
 } from "../src/modules/webhooks/repository.js";
 import type { SecretResolver } from "../src/modules/webhooks/service.js";
+
+/**
+ * Repo transactions no-op : garde ces tests M6-07 **hermétiques** au rapprochement
+ * M6-08 (le hook d'auto-rapprochement, désormais toujours câblé, ne trouve aucun
+ * membre → no-op sans toucher Prisma). La logique de rapprochement a ses propres
+ * tests dans `transactions.test.ts`.
+ */
+class NoopTransactionRepository implements TransactionRepository {
+  findById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  list(): Promise<{ transactions: []; total: number }> {
+    return Promise.resolve({ transactions: [], total: 0 });
+  }
+  getMemberById(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  findMembersByNormalizedEmail(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  membershipPeriodDays(): Promise<number> {
+    return Promise.resolve(365);
+  }
+  applyReconciliation(): Promise<never> {
+    return Promise.reject(new Error("NoopTransactionRepository: applyReconciliation non utilisé"));
+  }
+}
 
 const config: AppConfig = {
   NODE_ENV: "test",
@@ -96,6 +124,7 @@ async function makeApp(
     config: { ...config, ...overrides },
     webhookRepository: repo,
     webhookSecretResolver: resolver,
+    transactionRepository: new NoopTransactionRepository(),
   });
   await app.ready();
   return app;
