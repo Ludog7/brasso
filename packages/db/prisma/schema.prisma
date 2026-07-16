@@ -696,6 +696,7 @@ model CatalogItem {
   reservations      StockReservation[]
   recipeIngredients RecipeIngredient[]
   skuMappings       SkuMapping[]
+  displayItems      DisplayScreenItem[]
 
   @@index([kind])
   @@index([category])
@@ -850,4 +851,67 @@ model IntegrationAlert {
 
   @@index([status])
   @@index([type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module d'affichage en brasserie (M7-02, §Module d'affichage)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Mode de rendu d'un écran d'affichage (§Templates : liste / tableau / cartes).
+/// Enum figé (choix UI), ≠ constante métier (ADR-01).
+enum DisplayTemplate {
+  LIST
+  TABLE
+  CARDS
+}
+
+/// Surface d'affichage (Bar, Salle, Événement…). Nom **libre** — aucune constante
+/// métier codée en dur (ADR-01), l'association crée ses propres libellés.
+model DisplaySurface {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  screens DisplayScreen[]
+}
+
+/// Écran d'une surface : template de rendu + mentions légales (**texte libre**
+/// porté par l'écran — alcool/allergènes, aucune formulation réglementaire en dur).
+model DisplayScreen {
+  id            String          @id @default(cuid())
+  surfaceId     String
+  surface       DisplaySurface  @relation(fields: [surfaceId], references: [id], onDelete: Cascade)
+  name          String
+  template      DisplayTemplate @default(CARDS)
+  legalMentions String?
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  items DisplayScreenItem[]
+
+  @@index([surfaceId])
+}
+
+/// Produit sélectionné sur un écran + ses indicateurs (« nouveau »/« coup de
+/// cœur »/« brassin spécial »). `priceCents` : prix affiché optionnel (centimes).
+model DisplayScreenItem {
+  id            String        @id @default(cuid())
+  screenId      String
+  screen        DisplayScreen @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  catalogItemId String
+  catalogItem   CatalogItem   @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  isNew         Boolean       @default(false)
+  isFavorite    Boolean       @default(false)
+  isSpecial     Boolean       @default(false)
+  priceCents    Int?
+  sortOrder     Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([screenId, catalogItemId])
+  @@index([screenId])
 }
