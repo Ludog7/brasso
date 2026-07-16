@@ -11,6 +11,7 @@ import { EquipmentListPage } from "@/routes/equipment/EquipmentListPage";
 import { NewEquipmentPage } from "@/routes/equipment/NewEquipmentPage";
 import { HomePage } from "@/routes/HomePage";
 import { LoginPage } from "@/routes/LoginPage";
+import { MembersPage } from "@/routes/members/MembersPage";
 import { NewRecipePage } from "@/routes/recipes/NewRecipePage";
 import { RecipeDetailPage } from "@/routes/recipes/RecipeDetailPage";
 import { RecipeEditorPage } from "@/routes/recipes/RecipeEditorPage";
@@ -61,6 +62,7 @@ export function App() {
         <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
         <Route path="/equipment" element={<EquipmentListPage />} />
         <Route path="/stock" element={<StockPage />} />
+        <Route path="/members" element={<MembersPage />} />
         <Route path="/equipment/new" element={<NewEquipmentPage />} />
         <Route path="/equipment/:id/edit" element={<EditEquipmentPage />} />
         <Route path="/batches/new/:recipeId" element={<PlanBatchPage />} />

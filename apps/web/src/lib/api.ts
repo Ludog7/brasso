@@ -4,8 +4,10 @@
  * `/auth` vers l'API. `VITE_API_URL` permet de cibler une origine explicite.
  */
 import type {
+  AssociativeRole,
   BjcpStyle,
   CatalogKind,
+  ConsentType,
   DayEvent,
   DayPhase,
   DayPlan,
@@ -13,6 +15,7 @@ import type {
   EquipmentProfileInput,
   IngredientCategory,
   IngredientUse,
+  MembershipStatus,
   PreBoilCorrection,
   ProcessStepType,
   RecipeIngredientInput,
@@ -883,4 +886,100 @@ export const dayApi = {
       method: "POST",
       body: JSON.stringify({ events }),
     }).then((r) => r.day),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Membres & consentements (M6-04/05 api / M6-09 web). Miroir des vues API
+// (`MemberView` / `ConsentsView`) : dates sérialisées ISO, statut de cotisation
+// **dérivé** côté serveur. Accès réservé aux rôles `admin`/`rgpd` (matrice §3.5).
+// Minimisation (§6) : `birthDate` optionnelle. `memberNumber` immuable (hors update).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Vue d'un membre (miroir de `MemberView` côté API). */
+export interface Member {
+  id: string;
+  memberNumber: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  /** Date de naissance ISO — optionnelle (minimisation §6). */
+  birthDate: string | null;
+  /** Statut de cotisation **dérivé** (période × dernière cotisation). */
+  membership: MembershipStatus;
+  roles: AssociativeRole[];
+  lastContributionAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Corps de création d'un membre. `birthDate` en `YYYY-MM-DD` (coercée côté API). */
+export interface MemberCreateInput {
+  memberNumber: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  birthDate?: string;
+  roles?: AssociativeRole[];
+}
+
+/** Patch de rectification — `memberNumber` **immuable** (volontairement absent). */
+export type MemberUpdateInput = Partial<Omit<MemberCreateInput, "memberNumber">>;
+
+export interface MemberListFilters {
+  search?: string;
+  membership?: MembershipStatus;
+}
+
+/** Un événement de consentement historisé (miroir de `ConsentEventView`). */
+export interface ConsentEvent {
+  id: string;
+  type: ConsentType;
+  granted: boolean;
+  createdAt: string;
+}
+
+/** État des consentements : courant résolu par type + historique (append-only). */
+export interface ConsentState {
+  current: Record<ConsentType, { granted: boolean; at: string } | null>;
+  history: ConsentEvent[];
+}
+
+export const membersApi = {
+  list: (filters: MemberListFilters = {}): Promise<Member[]> => {
+    const qs = new URLSearchParams();
+    if (filters.search) qs.set("search", filters.search);
+    if (filters.membership) qs.set("membership", filters.membership);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ members: Member[] }>(`/api/members${suffix}`).then((r) => r.members);
+  },
+
+  get: (id: string): Promise<Member> =>
+    request<{ member: Member }>(`/api/members/${id}`).then((r) => r.member),
+
+  create: (input: MemberCreateInput): Promise<Member> =>
+    request<{ member: Member }>("/api/members", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.member),
+
+  update: (id: string, input: MemberUpdateInput): Promise<Member> =>
+    request<{ member: Member }>(`/api/members/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }).then((r) => r.member),
+
+  /** État courant + historique des consentements d'un membre. */
+  consents: (id: string): Promise<ConsentState> =>
+    request<ConsentState>(`/api/members/${id}/consents`),
+
+  /** Ajoute un événement de consentement (octroi/retrait) — append-only. */
+  setConsent: (id: string, input: { type: ConsentType; granted: boolean }): Promise<ConsentEvent> =>
+    request<{ event: ConsentEvent }>(`/api/members/${id}/consents`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.event),
 };

@@ -1,9 +1,10 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
 /**
- * Coquille de modale accessible partagée par les dialogues Stock (M5-07) :
- * overlay, `role="dialog"` + `aria-modal`, fermeture au clic-fond/Échap, focus
- * initial sur le premier champ. Miroir du pattern `ForceStepDialog` (Jour J).
+ * Coquille de modale accessible **partagée** : overlay, `role="dialog"` +
+ * `aria-modal`, fermeture au clic-fond/Échap, focus initial sur le premier champ.
+ * Cibles ≥ 48 px, mode sombre, zéro drag-and-drop (exigences UI §6). Utilisée par
+ * les dialogues Stock (M5-07) et Membres (M6-09).
  */
 export function DialogShell({
   title,
