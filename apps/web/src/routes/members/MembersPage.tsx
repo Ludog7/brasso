@@ -7,16 +7,15 @@
  */
 
 import type { MembershipStatus } from "@brasso/core";
-import { Loader2, LogOut, Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 
 import { useMembers } from "@/features/members/hooks";
 import { MemberFormDialog } from "@/features/members/MemberFormDialog";
 import { MemberList } from "@/features/members/MemberList";
-import { useLogout } from "@/hooks/useAuth";
 import type { Member } from "@/lib/api";
 import { canManageMembers } from "@/lib/rbac";
+import { AppShell } from "@/routes/AppShell";
 import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
 import { Card, CardContent } from "@/ui/card";
@@ -27,28 +26,6 @@ import { Select } from "@/ui/select";
 type MembershipFilter = MembershipStatus | "ALL";
 
 type Dialog = { mode: "create" } | { mode: "edit"; member: Member } | null;
-
-function PageShell({ children }: { children: React.ReactNode }) {
-  const logout = useLogout();
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <Link to="/" className="text-lg font-semibold">
-          Brasso
-        </Link>
-        <Button variant="outline" onClick={() => logout.mutate()} disabled={logout.isPending}>
-          {logout.isPending ? (
-            <Loader2 className="size-5 animate-spin" aria-hidden="true" />
-          ) : (
-            <LogOut className="size-5" aria-hidden="true" />
-          )}
-          Déconnexion
-        </Button>
-      </header>
-      <main className="mx-auto max-w-5xl p-6">{children}</main>
-    </div>
-  );
-}
 
 export function MembersPage() {
   const user = useSession((s) => s.user);
@@ -66,18 +43,18 @@ export function MembersPage() {
 
   if (!canManage) {
     return (
-      <PageShell>
+      <AppShell>
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             <p role="alert">Accès réservé aux rôles habilités (administration, référent RGPD).</p>
           </CardContent>
         </Card>
-      </PageShell>
+      </AppShell>
     );
   }
 
   return (
-    <PageShell>
+    <AppShell>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">Membres</h1>
         <Button onClick={() => setDialog({ mode: "create" })}>
@@ -141,6 +118,6 @@ export function MembersPage() {
       {dialog?.mode === "edit" ? (
         <MemberFormDialog member={dialog.member} onClose={() => setDialog(null)} />
       ) : null}
-    </PageShell>
+    </AppShell>
   );
 }

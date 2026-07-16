@@ -1,8 +1,8 @@
-import { BookOpen, Loader2, LogOut, Package, Users, Wrench } from "lucide-react";
+import { BookOpen, Coins, Loader2, LogOut, Package, ScrollText, Users, Wrench } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useLogout } from "@/hooks/useAuth";
-import { canManageMembers } from "@/lib/rbac";
+import { canListContributions, canManageMembers, canViewAudit } from "@/lib/rbac";
 import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -16,6 +16,8 @@ export function HomePage() {
   }
 
   const canMembers = canManageMembers(user.roles);
+  const canAudit = canViewAudit(user.roles);
+  const canContributions = canListContributions(user.roles);
 
   return (
     <div className="min-h-screen bg-background">
@@ -56,6 +58,22 @@ export function HomePage() {
               <Link to="/members">
                 <Users className="size-5" aria-hidden="true" />
                 Membres
+              </Link>
+            </Button>
+          ) : null}
+          {canContributions ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/contributions">
+                <Coins className="size-5" aria-hidden="true" />
+                Cotisations
+              </Link>
+            </Button>
+          ) : null}
+          {canAudit ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/audit">
+                <ScrollText className="size-5" aria-hidden="true" />
+                Audit
               </Link>
             </Button>
           ) : null}

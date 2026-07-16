@@ -65,3 +65,12 @@ export function useSetConsent(id: string) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: memberKeys.consents(id) }),
   });
 }
+
+/** Anonymisation RGPD (irréversible) : rafraîchit la liste (PII effacées). */
+export function useAnonymizeMember(id: string) {
+  const invalidate = useInvalidateMembers();
+  return useMutation({
+    mutationFn: () => membersApi.anonymize(id),
+    onSuccess: () => void invalidate(),
+  });
+}
