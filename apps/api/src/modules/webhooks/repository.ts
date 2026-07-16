@@ -5,7 +5,12 @@
  * repository en mémoire dans les tests.
  */
 
-import type { ExternalProviderKind, Prisma, PrismaClient } from "@brasso/db";
+import type {
+  ExternalProviderKind,
+  ExternalTransactionKind,
+  Prisma,
+  PrismaClient,
+} from "@brasso/db";
 
 /** Vue DB-agnostique d'un fournisseur externe (le secret n'est PAS en base). */
 export interface WebhookProviderRecord {
@@ -21,9 +26,13 @@ export interface WebhookProviderRecord {
 export interface ExternalTransactionInsert {
   providerId: string;
   externalId: string;
+  /** Nature normalisée : `MEMBERSHIP` (cotisation M6-07) ou `SALE` (vente M7-03). */
+  kind: ExternalTransactionKind;
   amountCents: number;
   currency: string;
   paymentMethod: string | null;
+  /** Référence produit du catalogue provider (clé du mapping M7-04) ; `null` si absente. */
+  externalProductId: string | null;
   occurredAt: Date;
   rawPayload: Prisma.InputJsonValue;
 }
@@ -34,7 +43,7 @@ export interface WebhookRepository {
   findActiveProvider(kind: ExternalProviderKind): Promise<WebhookProviderRecord | null>;
   /** Transaction déjà ingérée pour ce couple `(providerId, externalId)` — idempotence. */
   findTransaction(providerId: string, externalId: string): Promise<{ id: string } | null>;
-  /** Insère une transaction `MEMBERSHIP` `UNMAPPED` (append-only). */
+  /** Insère une transaction externe `UNMAPPED` (append-only), du `kind` fourni. */
   insertTransaction(data: ExternalTransactionInsert): Promise<{ id: string }>;
 }
 
@@ -62,10 +71,11 @@ export class PrismaWebhookRepository implements WebhookRepository {
       data: {
         providerId: data.providerId,
         externalId: data.externalId,
-        kind: "MEMBERSHIP",
+        kind: data.kind,
         amountCents: data.amountCents,
         currency: data.currency,
         paymentMethod: data.paymentMethod,
+        externalProductId: data.externalProductId,
         status: "UNMAPPED",
         occurredAt: data.occurredAt,
         rawPayload: data.rawPayload,

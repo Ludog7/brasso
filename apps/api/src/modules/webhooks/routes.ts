@@ -3,7 +3,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 
 import type { WebhookRepository } from "./repository.js";
 import { PrismaWebhookRepository } from "./repository.js";
-import type { SecretResolver } from "./service.js";
+import type { SaleIngestResult, SecretResolver, WebhookIngestInput } from "./service.js";
 import { WebhookSecretMisconfiguredError, WebhookService } from "./service.js";
 
 declare module "fastify" {
@@ -106,4 +106,50 @@ export const webhooksRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (a
       }
     },
   );
+
+  /**
+   * Routes de vente terminal (M7-03) — **même contrat que HelloAsso** : publiques
+   * (la signature EST l'auth), rate-limitées, corps brut. Persistent une vente
+   * normalisée `SALE`/`UNMAPPED` (idempotent). Le rapprochement vente→stock est
+   * **hors périmètre** ({{M7-05}} branchera sa logique sur cette ingestion).
+   */
+  const registerSaleWebhook = (
+    path: string,
+    providerLabel: string,
+    ingest: (input: WebhookIngestInput) => Promise<SaleIngestResult>,
+  ): void => {
+    app.post(
+      path,
+      {
+        config: {
+          rbacExempt: true,
+          rateLimit: { max: app.config.RATE_LIMIT_MAX, timeWindow: app.config.RATE_LIMIT_WINDOW },
+        },
+      },
+      async (request, reply) => {
+        const rawBody = request.rawBody ?? Buffer.alloc(0);
+        try {
+          const result = await ingest({
+            rawBody,
+            headers: request.headers,
+            payload: request.body,
+          });
+          return reply
+            .code(result.status === "created" ? 201 : 200)
+            .send({ status: result.status });
+        } catch (err) {
+          if (err instanceof WebhookSecretMisconfiguredError) {
+            request.log.error(
+              { secretRef: err.secretRef },
+              `Webhook ${providerLabel} : secret introuvable en environnement`,
+            );
+          }
+          throw err;
+        }
+      },
+    );
+  };
+
+  registerSaleWebhook("/webhooks/sumup", "SumUp", (input) => service.ingestSumUp(input));
+  registerSaleWebhook("/webhooks/zettle", "Zettle", (input) => service.ingestZettle(input));
 };
