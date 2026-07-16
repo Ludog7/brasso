@@ -19,6 +19,11 @@ export interface MembershipIngestedEvent {
   payerEmail: string | null;
 }
 
+/** Événement émis après ingestion d'une vente (rapprochement vente→stock M7-05). */
+export interface SaleIngestedEvent {
+  transactionId: string;
+}
+
 export interface WebhookRoutesOptions {
   /** Repository webhooks injecté (tests) ; sinon adossé à Prisma. */
   repository?: WebhookRepository;
@@ -29,6 +34,11 @@ export interface WebhookRoutesOptions {
    * une erreur ici est journalisée mais **ne casse pas** l'ingestion (§M6-07/M6-08).
    */
   onMembershipIngested?: (event: MembershipIngestedEvent) => Promise<void>;
+  /**
+   * Post-traitement d'une vente **créée** (rapprochement vente→stock M7-05). Best-effort :
+   * une erreur ici est journalisée mais **ne casse pas** l'ingestion (§ADR-09).
+   */
+  onSaleIngested?: (event: SaleIngestedEvent) => Promise<void>;
 }
 
 /**
@@ -134,6 +144,18 @@ export const webhooksRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (a
             headers: request.headers,
             payload: request.body,
           });
+          // Rapprochement vente→stock (M7-05) : post-traitement d'une vente NOUVELLE.
+          // Best-effort — jamais bloquant pour l'ingestion (append-only déjà persisté).
+          if (result.status === "created" && opts.onSaleIngested) {
+            try {
+              await opts.onSaleIngested({ transactionId: result.transactionId });
+            } catch (reconcileErr) {
+              request.log.error(
+                { err: reconcileErr, transactionId: result.transactionId },
+                "Rapprochement vente→stock échoué (vente conservée, à re-traiter)",
+              );
+            }
+          }
           return reply
             .code(result.status === "created" ? 201 : 200)
             .send({ status: result.status });
