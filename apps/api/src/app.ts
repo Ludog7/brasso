@@ -1,3 +1,4 @@
+import { prisma } from "@brasso/db";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -6,7 +7,9 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "./config.js";
 import type { AuditRepository } from "./modules/audit/repository.js";
+import { PrismaAuditRepository } from "./modules/audit/repository.js";
 import { auditRoutes } from "./modules/audit/routes.js";
+import { AuditService } from "./modules/audit/service.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import type { DayRepository } from "./modules/batches/day.repository.js";
@@ -24,6 +27,10 @@ import type { CatalogRepository } from "./modules/referentials/repository.js";
 import { referentialsRoutes } from "./modules/referentials/routes.js";
 import type { StockRepository } from "./modules/stock/repository.js";
 import { stockRoutes } from "./modules/stock/routes.js";
+import type { TransactionRepository } from "./modules/transactions/repository.js";
+import { PrismaTransactionRepository } from "./modules/transactions/repository.js";
+import { transactionsRoutes } from "./modules/transactions/routes.js";
+import { TransactionService } from "./modules/transactions/service.js";
 import type { WebhookRepository } from "./modules/webhooks/repository.js";
 import { webhooksRoutes } from "./modules/webhooks/routes.js";
 import type { SecretResolver } from "./modules/webhooks/service.js";
@@ -57,6 +64,8 @@ export interface BuildAppOptions {
   webhookRepository?: WebhookRepository;
   /** Résolveur de secret webhook injecté (tests) ; sinon lecture de `process.env`. */
   webhookSecretResolver?: SecretResolver;
+  /** Repository transactions/rapprochement injecté (tests) ; sinon adossé à Prisma. */
+  transactionRepository?: TransactionRepository;
 }
 
 /**
@@ -98,21 +107,35 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
   await app.register(stockRoutes, { prefix: "/api", repository: opts.stockRepository });
 
-  // Journal d'audit (M6-03) : consommé par les modules membres/RGPD/rapprochement
-  // (via `AuditService.record`) pour tracer les actions sensibles.
-  await app.register(auditRoutes, { prefix: "/api", repository: opts.auditRepository });
+  // Repository d'audit résolu une fois : partagé par les modules membres/RGPD/
+  // rapprochement (via `AuditService.record`) pour tracer les actions sensibles.
+  const auditRepository = opts.auditRepository ?? new PrismaAuditRepository(prisma);
+
+  // Journal d'audit (M6-03).
+  await app.register(auditRoutes, { prefix: "/api", repository: auditRepository });
   // Fichier membres (M6-04) : partage le même repository d'audit.
   await app.register(membersRoutes, {
     prefix: "/api",
     repository: opts.memberRepository,
-    auditRepository: opts.auditRepository,
+    auditRepository,
   });
 
+  // Rapprochement cotisation→membre (M6-08) : service partagé entre les endpoints
+  // `/transactions` et l'auto-rapprochement déclenché par le webhook (M6-07).
+  const transactionService = new TransactionService(
+    opts.transactionRepository ?? new PrismaTransactionRepository(prisma),
+    new AuditService(auditRepository),
+  );
+  await app.register(transactionsRoutes, { prefix: "/api", service: transactionService });
+
   // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
-  // comme /health et /auth. Fondation générique réutilisée par M7.
+  // comme /health et /auth. Fondation générique réutilisée par M7. L'ingestion
+  // d'une cotisation déclenche l'auto-rapprochement (best-effort, M6-08).
   await app.register(webhooksRoutes, {
     repository: opts.webhookRepository,
     secretResolver: opts.webhookSecretResolver,
+    onMembershipIngested: ({ transactionId, payerEmail }) =>
+      transactionService.autoReconcile(transactionId, payerEmail).then(() => undefined),
   });
 
   return app;

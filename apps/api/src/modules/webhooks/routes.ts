@@ -13,11 +13,22 @@ declare module "fastify" {
   }
 }
 
+/** Événement émis après ingestion d'une cotisation (auto-rapprochement M6-08). */
+export interface MembershipIngestedEvent {
+  transactionId: string;
+  payerEmail: string | null;
+}
+
 export interface WebhookRoutesOptions {
   /** Repository webhooks injecté (tests) ; sinon adossé à Prisma. */
   repository?: WebhookRepository;
   /** Résolveur de secret injecté (tests) ; sinon lecture directe de `process.env`. */
   secretResolver?: SecretResolver;
+  /**
+   * Post-traitement d'une cotisation **créée** (auto-rapprochement M6-08). Best-effort :
+   * une erreur ici est journalisée mais **ne casse pas** l'ingestion (§M6-07/M6-08).
+   */
+  onMembershipIngested?: (event: MembershipIngestedEvent) => Promise<void>;
 }
 
 /**
@@ -67,6 +78,21 @@ export const webhooksRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (a
           headers: request.headers,
           payload: request.body,
         });
+        // Auto-rapprochement (M6-08) : post-traitement d'une cotisation NOUVELLE.
+        // Best-effort — jamais bloquant pour l'ingestion (ADR : append-only déjà persisté).
+        if (result.status === "created" && opts.onMembershipIngested) {
+          try {
+            await opts.onMembershipIngested({
+              transactionId: result.transactionId,
+              payerEmail: result.payerEmail,
+            });
+          } catch (reconcileErr) {
+            request.log.error(
+              { err: reconcileErr, transactionId: result.transactionId },
+              "Auto-rapprochement de cotisation échoué (cotisation conservée, à rapprocher)",
+            );
+          }
+        }
         return reply.code(result.status === "created" ? 201 : 200).send({ status: result.status });
       } catch (err) {
         // Secret non configuré : incident ops (loggé), réponse générique au client.

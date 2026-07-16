@@ -21,6 +21,8 @@ export interface NormalizedMembershipEvent {
   currency: string;
   occurredAt: Date;
   paymentMethod: string | null;
+  /** Email du payeur (rapprochement M6-08). Conservé aussi intégralement en `rawPayload`. */
+  payerEmail: string | null;
 }
 
 /**
@@ -39,6 +41,9 @@ const helloAssoEventSchema = z
         }),
         date: z.coerce.date(),
         paymentMeans: z.string().min(1).optional(),
+        // Email non validé strictement : un format douteux ne doit pas casser
+        // l'ingestion (le rapprochement échouera simplement) ; le brut reste conservé.
+        payer: z.object({ email: z.string().optional() }).passthrough().optional(),
       })
       .passthrough(),
   })
@@ -57,5 +62,6 @@ export function normalizeMembershipEvent(payload: unknown): NormalizedMembership
     currency: data.amount.currency,
     occurredAt: data.date,
     paymentMethod: data.paymentMeans ?? null,
+    payerEmail: data.payer?.email ?? null,
   };
 }
