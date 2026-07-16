@@ -104,6 +104,74 @@ async function seedCatalog(): Promise<void> {
 }
 
 /**
+ * Module d'affichage (M7-02) : une surface « Bar » + un écran `CARDS` de démo
+ * pointant 2-3 produits conditionnés du catalogue (démo M7-13). Idempotent :
+ * upsert par `name` (surface), par `id` déterministe (écran), par la clé unique
+ * `(screenId, catalogItemId)` (items). Les mentions légales sont du **texte
+ * libre** porté par l'écran (aucune formulation réglementaire codée en dur, ADR-01).
+ */
+async function seedDisplay(): Promise<void> {
+  const surface = await prisma.displaySurface.upsert({
+    where: { name: "Bar" },
+    create: { id: "surface-bar", name: "Bar", description: "Comptoir de la brasserie" },
+    update: { description: "Comptoir de la brasserie", isActive: true },
+  });
+
+  const screenId = "screen-bar-cartes";
+  await prisma.displayScreen.upsert({
+    where: { id: screenId },
+    create: {
+      id: screenId,
+      surfaceId: surface.id,
+      name: "Cartes du bar",
+      template: "CARDS",
+      legalMentions: "L'abus d'alcool est dangereux pour la santé. À consommer avec modération.",
+    },
+    update: {
+      surfaceId: surface.id,
+      name: "Cartes du bar",
+      template: "CARDS",
+      legalMentions: "L'abus d'alcool est dangereux pour la santé. À consommer avec modération.",
+      isActive: true,
+    },
+  });
+
+  const items = [
+    {
+      catalogItemId: "cat-pkg-bottle-33",
+      isNew: true,
+      isFavorite: false,
+      isSpecial: false,
+      sortOrder: 0,
+      priceCents: 450,
+    },
+    {
+      catalogItemId: "cat-pkg-bottle-75",
+      isNew: false,
+      isFavorite: true,
+      isSpecial: false,
+      sortOrder: 1,
+      priceCents: 900,
+    },
+    {
+      catalogItemId: "cat-pkg-keg-20",
+      isNew: false,
+      isFavorite: false,
+      isSpecial: true,
+      sortOrder: 2,
+      priceCents: 12000,
+    },
+  ];
+  for (const { catalogItemId, ...data } of items) {
+    await prisma.displayScreenItem.upsert({
+      where: { screenId_catalogItemId: { screenId, catalogItemId } },
+      create: { screenId, catalogItemId, ...data },
+      update: data,
+    });
+  }
+}
+
+/**
  * Compte admin de développement, amorcé depuis l'environnement (jamais de mot de
  * passe hardcodé). Absent des variables → étape ignorée. Rejoue proprement :
  * upsert par email + affectation du rôle admin.
@@ -145,15 +213,19 @@ async function main(): Promise<void> {
   await seedRoles();
   await seedProviders();
   await seedCatalog();
+  await seedDisplay();
   const adminSeeded = await seedAdminUser();
 
   // Critère observable (DoD) : comptages sur les tables amorcées.
-  const [settingsCount, roleCount, userCount, providerCount] = await Promise.all([
-    prisma.settings.count(),
-    prisma.role.count(),
-    prisma.user.count(),
-    prisma.externalProvider.count(),
-  ]);
+  const [settingsCount, roleCount, userCount, providerCount, surfaceCount, screenItemCount] =
+    await Promise.all([
+      prisma.settings.count(),
+      prisma.role.count(),
+      prisma.user.count(),
+      prisma.externalProvider.count(),
+      prisma.displaySurface.count(),
+      prisma.displayScreenItem.count(),
+    ]);
   const catalogByKind = await prisma.catalogItem.groupBy({
     by: ["kind"],
     _count: { _all: true },
@@ -168,6 +240,7 @@ async function main(): Promise<void> {
   }
   console.log(`   • Styles BJCP  : ${BJCP_STYLES.length} (référence statique)`);
   console.log(`   • Providers    : ${providerCount}`);
+  console.log(`   • Affichage    : ${surfaceCount} surface(s), ${screenItemCount} produit(s)`);
   console.log(`   • Utilisateurs : ${userCount}${adminSeeded ? " (admin dev inclus)" : ""}`);
 }
 
