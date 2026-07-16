@@ -12,6 +12,7 @@ import type { IncomingHttpHeaders } from "node:http";
 
 import type { ExternalSaleInput } from "@brasso/core";
 import type { ExternalProviderKind, Prisma } from "@brasso/db";
+import { ZodError } from "zod";
 
 import type { WebhookProviderRecord, WebhookRepository } from "./repository.js";
 import { normalizeMembershipEvent, normalizeSumUpSale, normalizeZettleSale } from "./schema.js";
@@ -55,6 +56,13 @@ export class WebhookSecretMisconfiguredError extends WebhookSignatureInvalidErro
 /** Résout un secret depuis l'environnement (nom = `provider.webhookSecretRef`). */
 export type SecretResolver = (ref: string) => string | undefined;
 
+/**
+ * Sink d'échec d'ingestion **post-signature** (émission `WEBHOOK_FAILURE`, M7-06).
+ * Best-effort : appelé quand la normalisation/persistance échoue **après** une
+ * signature valide — jamais sur un échec de signature (bruit/attaques).
+ */
+export type WebhookFailureSink = (providerId: string, message: string) => Promise<void>;
+
 /** Entrée d'ingestion : octets bruts (signature) + en-têtes + payload déjà parsé. */
 export interface WebhookIngestInput {
   rawBody: Buffer;
@@ -84,6 +92,7 @@ export class WebhookService {
   constructor(
     private readonly repo: WebhookRepository,
     private readonly secretResolver: SecretResolver = (ref) => process.env[ref],
+    private readonly onPostSignatureFailure?: WebhookFailureSink,
   ) {}
 
   /**
@@ -94,27 +103,37 @@ export class WebhookService {
   async ingestHelloAsso(input: WebhookIngestInput): Promise<WebhookIngestResult> {
     const provider = await this.authenticate("HELLOASSO", input);
 
-    // Contenu digne de confiance seulement maintenant : on projette le payload
-    // (déjà parsé par le content-type parser) et on conserve l'original intégral.
-    const normalized = normalizeMembershipEvent(input.payload);
+    return this.runPostSignature(provider.id, async () => {
+      // Contenu digne de confiance seulement maintenant : on projette le payload
+      // (déjà parsé par le content-type parser) et on conserve l'original intégral.
+      const normalized = normalizeMembershipEvent(input.payload);
 
-    const existing = await this.repo.findTransaction(provider.id, normalized.externalId);
-    if (existing) {
-      return { status: "duplicate", transactionId: existing.id, payerEmail: normalized.payerEmail };
-    }
+      const existing = await this.repo.findTransaction(provider.id, normalized.externalId);
+      if (existing) {
+        return {
+          status: "duplicate" as const,
+          transactionId: existing.id,
+          payerEmail: normalized.payerEmail,
+        };
+      }
 
-    const created = await this.repo.insertTransaction({
-      providerId: provider.id,
-      externalId: normalized.externalId,
-      kind: "MEMBERSHIP",
-      amountCents: normalized.amountCents,
-      currency: normalized.currency,
-      paymentMethod: normalized.paymentMethod,
-      externalProductId: null,
-      occurredAt: normalized.occurredAt,
-      rawPayload: input.payload as Prisma.InputJsonValue,
+      const created = await this.repo.insertTransaction({
+        providerId: provider.id,
+        externalId: normalized.externalId,
+        kind: "MEMBERSHIP",
+        amountCents: normalized.amountCents,
+        currency: normalized.currency,
+        paymentMethod: normalized.paymentMethod,
+        externalProductId: null,
+        occurredAt: normalized.occurredAt,
+        rawPayload: input.payload as Prisma.InputJsonValue,
+      });
+      return {
+        status: "created" as const,
+        transactionId: created.id,
+        payerEmail: normalized.payerEmail,
+      };
     });
-    return { status: "created", transactionId: created.id, payerEmail: normalized.payerEmail };
   }
 
   /** Ingère une vente **SumUp** signée → `ExternalTransaction` `SALE`/`UNMAPPED` (M7-03). */
@@ -140,25 +159,59 @@ export class WebhookService {
   ): Promise<SaleIngestResult> {
     const provider = await this.authenticate(kind, input);
 
-    const sale = normalize(input.payload);
+    return this.runPostSignature(provider.id, async () => {
+      const sale = normalize(input.payload);
 
-    const existing = await this.repo.findTransaction(provider.id, sale.externalId);
-    if (existing) {
-      return { status: "duplicate", transactionId: existing.id };
-    }
+      const existing = await this.repo.findTransaction(provider.id, sale.externalId);
+      if (existing) {
+        return { status: "duplicate" as const, transactionId: existing.id };
+      }
 
-    const created = await this.repo.insertTransaction({
-      providerId: provider.id,
-      externalId: sale.externalId,
-      kind: "SALE",
-      amountCents: sale.amountCents,
-      currency: sale.currency,
-      paymentMethod: sale.paymentMethod ?? null,
-      externalProductId: sale.externalProductId ?? null,
-      occurredAt: sale.occurredAt,
-      rawPayload: input.payload as Prisma.InputJsonValue,
+      const created = await this.repo.insertTransaction({
+        providerId: provider.id,
+        externalId: sale.externalId,
+        kind: "SALE",
+        amountCents: sale.amountCents,
+        currency: sale.currency,
+        paymentMethod: sale.paymentMethod ?? null,
+        externalProductId: sale.externalProductId ?? null,
+        occurredAt: sale.occurredAt,
+        rawPayload: input.payload as Prisma.InputJsonValue,
+      });
+      return { status: "created" as const, transactionId: created.id };
     });
-    return { status: "created", transactionId: created.id };
+  }
+
+  /**
+   * Exécute le traitement **post-signature** (normalisation + persistance) en
+   * émettant une anomalie `WEBHOOK_FAILURE` si une erreur survient à ce stade
+   * (best-effort), puis relance l'erreur d'origine (réponse générique au provider).
+   * Un échec de signature (levé **avant** ce point) ne passe jamais ici → aucune
+   * anomalie sur signature invalide.
+   */
+  private async runPostSignature<T>(providerId: string, work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (err) {
+      await this.emitFailure(providerId, err);
+      throw err;
+    }
+  }
+
+  /** Émet l'anomalie d'échec (message technique **non sensible**), best-effort. */
+  private async emitFailure(providerId: string, err: unknown): Promise<void> {
+    if (!this.onPostSignatureFailure) {
+      return;
+    }
+    const message =
+      err instanceof ZodError
+        ? "Normalisation du payload impossible"
+        : "Échec d'ingestion du webhook";
+    try {
+      await this.onPostSignatureFailure(providerId, message);
+    } catch {
+      // Émission best-effort : ne jamais masquer l'erreur d'ingestion d'origine.
+    }
   }
 
   /**
