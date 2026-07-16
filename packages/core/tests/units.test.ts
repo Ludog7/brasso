@@ -5,11 +5,14 @@ import {
   BAR_PER_PSI,
   barToPsi,
   brixToPlato,
+  centsToEuros,
   cToF,
   DEFAULT_EFFICIENCY,
   DEFAULT_MASH_RATIO,
   ebcToLovibond,
   ebcToSrm,
+  eurosToCents,
+  formatCentsToEuros,
   fToC,
   galToL,
   GRAIN_ABSORPTION,
@@ -152,5 +155,36 @@ describe("pression", () => {
     expect(psiToBar(1)).toBeCloseTo(0.0689476, EXACT);
     expect(barToPsi(0.0689476)).toBeCloseTo(1, EXACT);
     expect(barToPsi(psiToBar(11))).toBeCloseTo(11, EXACT);
+  });
+});
+
+describe("monnaie (centimes ↔ euros)", () => {
+  it("centimes → euros (valeur numérique)", () => {
+    expect(centsToEuros(1234)).toBeCloseTo(12.34, EXACT);
+    expect(centsToEuros(0)).toBe(0);
+    expect(centsToEuros(-500)).toBeCloseTo(-5, EXACT);
+  });
+
+  it("euros → centimes (arrondi au centime)", () => {
+    expect(eurosToCents(12.34)).toBe(1234);
+    expect(eurosToCents(0)).toBe(0);
+    expect(eurosToCents(-5)).toBe(-500);
+    // Arrondi : 0.005 € → 1 centime.
+    expect(eurosToCents(0.005)).toBe(1);
+  });
+
+  it("centimes → chaîne euros déterministe (séparateur `.`, deux décimales)", () => {
+    expect(formatCentsToEuros(1234)).toBe("12.34");
+    expect(formatCentsToEuros(0)).toBe("0.00");
+    expect(formatCentsToEuros(5)).toBe("0.05");
+    expect(formatCentsToEuros(100)).toBe("1.00");
+    expect(formatCentsToEuros(-750)).toBe("-7.50");
+    // Non entier → arrondi au centime.
+    expect(formatCentsToEuros(1234.6)).toBe("12.35");
+  });
+
+  it("formatCentsToEuros rejette un montant non fini", () => {
+    expect(() => formatCentsToEuros(Number.NaN)).toThrow(RangeError);
+    expect(() => formatCentsToEuros(Number.POSITIVE_INFINITY)).toThrow(RangeError);
   });
 });

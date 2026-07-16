@@ -235,3 +235,34 @@ export function psiToBar(psi: number): number {
 export function barToPsi(bar: number): number {
   return bar / BAR_PER_PSI;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Monnaie (unité interne : centime entier ; euros à l'affichage / export)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Centimes → euros (valeur numérique) : `12.34 = centsToEuros(1234)`. */
+export function centsToEuros(cents: number): number {
+  return cents / 100;
+}
+
+/** Euros → centimes entiers (arrondi au centime) : `1234 = eurosToCents(12.34)`. */
+export function eurosToCents(euros: number): number {
+  return Math.round(euros * 100);
+}
+
+/**
+ * Centimes → chaîne euros **déterministe** et indépendante de la locale (séparateur
+ * décimal `.`, deux décimales) — encodage stable pour les exports CSV compta (M7-07).
+ * Le montant est arrondi au centime. `RangeError` si `cents` n'est pas fini.
+ */
+export function formatCentsToEuros(cents: number): string {
+  if (!Number.isFinite(cents)) {
+    throw new RangeError("formatCentsToEuros: cents doit être un nombre fini.");
+  }
+  const rounded = Math.round(cents);
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
+  const whole = Math.floor(abs / 100);
+  const frac = abs % 100;
+  return `${sign}${whole}.${frac.toString().padStart(2, "0")}`;
+}
