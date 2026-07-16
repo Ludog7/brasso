@@ -11,6 +11,8 @@ import { Loader2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
 import type { Member, MemberCreateInput } from "@/lib/api";
+import { canRunRgpd } from "@/lib/rbac";
+import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
 import { DialogShell } from "@/ui/dialog-shell";
 import { Input } from "@/ui/input";
@@ -19,6 +21,7 @@ import { Label } from "@/ui/label";
 import { ConsentPanel } from "./ConsentPanel";
 import { useCreateMember, useUpdateMember } from "./hooks";
 import { ASSOCIATIVE_ROLE_LABELS, ASSOCIATIVE_ROLES } from "./labels";
+import { RgpdActions } from "./RgpdActions";
 
 /** ISO (`1990-05-01T…`) → valeur d'un `<input type=date>` (`1990-05-01`). */
 function toDateInput(iso: string | null): string {
@@ -27,6 +30,7 @@ function toDateInput(iso: string | null): string {
 
 export function MemberFormDialog({ member, onClose }: { member?: Member; onClose: () => void }) {
   const editing = member !== undefined;
+  const sessionRoles = useSession((s) => s.user?.roles ?? []);
   const create = useCreateMember();
   const update = useUpdateMember(member?.id ?? "");
   const mutation = editing ? update : create;
@@ -195,6 +199,12 @@ export function MemberFormDialog({ member, onClose }: { member?: Member; onClose
       {editing && member ? (
         <div className="mt-2 border-t border-border pt-4">
           <ConsentPanel memberId={member.id} />
+        </div>
+      ) : null}
+
+      {editing && member && canRunRgpd(sessionRoles) ? (
+        <div className="mt-2 border-t border-border pt-4">
+          <RgpdActions member={member} />
         </div>
       ) : null}
     </DialogShell>

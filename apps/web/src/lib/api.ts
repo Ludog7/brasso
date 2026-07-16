@@ -982,4 +982,95 @@ export const membersApi = {
       method: "POST",
       body: JSON.stringify(input),
     }).then((r) => r.event),
+
+  // ── RGPD (M6-06 api / M6-10 web) — réservé au rôle `rgpd`. ──
+
+  /** Dossier RGPD complet (droit d'accès) — objet JSON opaque, destiné au téléchargement. */
+  exportDossier: (id: string): Promise<Record<string, unknown>> =>
+    request<Record<string, unknown>>(`/api/members/${id}/export`),
+
+  /** Anonymise un membre (irréversible) — renvoie la fiche PII effacée. 409 si déjà fait. */
+  anonymize: (id: string): Promise<Member> =>
+    request<{ member: Member }>(`/api/members/${id}/anonymize`, { method: "POST" }).then(
+      (r) => r.member,
+    ),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Journal d'audit (M6-03 api / M6-10 web). Lecture seule, réservée `admin`/`rgpd`
+// (matrice §3.5). Dates ISO. `metadata` opaque (contenu selon l'action).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Entrée d'audit (miroir de `AuditEntryView` côté API). */
+export interface AuditEntry {
+  id: string;
+  userId: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  memberId: string | null;
+  ip: string | null;
+  metadata: unknown;
+  createdAt: string;
+}
+
+export interface AuditListFilters {
+  memberId?: string;
+  resourceType?: string;
+  action?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AuditListResult {
+  entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export const auditApi = {
+  list: (filters: AuditListFilters = {}): Promise<AuditListResult> => {
+    const qs = new URLSearchParams();
+    if (filters.memberId) qs.set("memberId", filters.memberId);
+    if (filters.resourceType) qs.set("resourceType", filters.resourceType);
+    if (filters.action) qs.set("action", filters.action);
+    if (filters.limit != null) qs.set("limit", String(filters.limit));
+    if (filters.offset != null) qs.set("offset", String(filters.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<AuditListResult>(`/api/audit${suffix}`);
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cotisations / rapprochement (M6-08 api / M6-10 web). Transaction externe
+// read-only (ADR-09) : payload brut jamais renvoyé → l'UI dispose du montant, de
+// la date et de la référence native (`externalId`), pas de l'email du payeur.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Transaction externe (miroir de `TransactionView` — sous-ensemble exploité ici). */
+export interface Contribution {
+  id: string;
+  externalId: string;
+  amountCents: number;
+  currency: string;
+  paymentMethod: string | null;
+  status: "MAPPED" | "UNMAPPED" | "IGNORED";
+  memberId: string | null;
+  occurredAt: string;
+}
+
+export const contributionsApi = {
+  /** Cotisations `MEMBERSHIP` en attente de rapprochement (`UNMAPPED`), récentes d'abord. */
+  pending: (): Promise<Contribution[]> =>
+    request<{ transactions: Contribution[] }>(
+      "/api/transactions?status=UNMAPPED&kind=MEMBERSHIP",
+    ).then((r) => r.transactions),
+
+  /** Rapproche une cotisation à un membre → membre `A_JOUR` (dérivé côté API). */
+  reconcile: (id: string, memberId: string): Promise<Contribution> =>
+    request<{ transaction: Contribution }>(`/api/transactions/${id}/reconcile`, {
+      method: "POST",
+      body: JSON.stringify({ memberId }),
+    }).then((r) => r.transaction),
 };
