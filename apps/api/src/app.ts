@@ -24,6 +24,9 @@ import type { CatalogRepository } from "./modules/referentials/repository.js";
 import { referentialsRoutes } from "./modules/referentials/routes.js";
 import type { StockRepository } from "./modules/stock/repository.js";
 import { stockRoutes } from "./modules/stock/routes.js";
+import type { WebhookRepository } from "./modules/webhooks/repository.js";
+import { webhooksRoutes } from "./modules/webhooks/routes.js";
+import type { SecretResolver } from "./modules/webhooks/service.js";
 import authPlugin from "./plugins/auth.js";
 import configPlugin from "./plugins/config.js";
 import errorHandler from "./plugins/errorHandler.js";
@@ -50,6 +53,10 @@ export interface BuildAppOptions {
   auditRepository?: AuditRepository;
   /** Repository membres injecté (tests) ; sinon adossé à Prisma. */
   memberRepository?: MemberRepository;
+  /** Repository webhooks injecté (tests) ; sinon adossé à Prisma. */
+  webhookRepository?: WebhookRepository;
+  /** Résolveur de secret webhook injecté (tests) ; sinon lecture de `process.env`. */
+  webhookSecretResolver?: SecretResolver;
 }
 
 /**
@@ -99,6 +106,13 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     prefix: "/api",
     repository: opts.memberRepository,
     auditRepository: opts.auditRepository,
+  });
+
+  // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
+  // comme /health et /auth. Fondation générique réutilisée par M7.
+  await app.register(webhooksRoutes, {
+    repository: opts.webhookRepository,
+    secretResolver: opts.webhookSecretResolver,
   });
 
   return app;
