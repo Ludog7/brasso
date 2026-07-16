@@ -65,3 +65,6 @@ export * from "./stock/index.js";
 
 // Helpers purs membres & RGPD — statut dérivé, consentements, anonymisation, export (M6-02, §3.4).
 export * from "./members/index.js";
+
+// Helpers purs hub caisse & affichage — rapprochement vente↔stock, CSV compta, rendu écran (M7-01, §3.6).
+export * from "./hub/index.js";

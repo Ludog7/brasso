@@ -110,6 +110,28 @@ export const associativeRoleSchema = z.enum([
   "REFERENT_RGPD",
 ]);
 
+/** Fournisseur externe branché au hub caisse (Prisma `ExternalProviderKind`, ADR-09). */
+export const externalProviderKindSchema = z.enum(["HELLOASSO", "SUMUP", "ZETTLE"]);
+
+/** Nature normalisée d'une transaction externe (Prisma `ExternalTransactionKind`). */
+export const externalTransactionKindSchema = z.enum(["SALE", "MEMBERSHIP", "DONATION", "OTHER"]);
+
+/** Statut de rapprochement d'une transaction externe (Prisma `ExternalTransactionStatus`, §3.6). */
+export const externalTransactionStatusSchema = z.enum(["MAPPED", "UNMAPPED", "IGNORED"]);
+
+/** Type d'anomalie d'intégration (Prisma `IntegrationAlertType`, dashboard anomalies §3.6). */
+export const integrationAlertTypeSchema = z.enum([
+  "UNMAPPED_TRANSACTION",
+  "WEBHOOK_FAILURE",
+  "OTHER",
+]);
+
+/** Statut d'une anomalie d'intégration (Prisma `IntegrationAlertStatus`). */
+export const integrationAlertStatusSchema = z.enum(["OPEN", "RESOLVED"]);
+
+/** Mode de rendu d'un écran d'affichage (Prisma `DisplayTemplate`, M7-02, §Templates). */
+export const displayTemplateSchema = z.enum(["LIST", "TABLE", "CARDS"]);
+
 export type RecipeEngine = z.infer<typeof recipeEngineSchema>;
 export type RecipeStatus = z.infer<typeof recipeStatusSchema>;
 export type IngredientCategory = z.infer<typeof ingredientCategorySchema>;
@@ -124,3 +146,9 @@ export type ReservationStatus = z.infer<typeof reservationStatusSchema>;
 export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
 export type ConsentType = z.infer<typeof consentTypeSchema>;
 export type AssociativeRole = z.infer<typeof associativeRoleSchema>;
+export type ExternalProviderKind = z.infer<typeof externalProviderKindSchema>;
+export type ExternalTransactionKind = z.infer<typeof externalTransactionKindSchema>;
+export type ExternalTransactionStatus = z.infer<typeof externalTransactionStatusSchema>;
+export type IntegrationAlertType = z.infer<typeof integrationAlertTypeSchema>;
+export type IntegrationAlertStatus = z.infer<typeof integrationAlertStatusSchema>;
+export type DisplayTemplate = z.infer<typeof displayTemplateSchema>;
