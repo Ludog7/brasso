@@ -53,10 +53,10 @@ async function seedRoles(): Promise<void> {
 }
 
 /**
- * Fournisseurs externes (M6-07) : amorce le provider **HelloAsso** pour l'ingestion
- * des cotisations par webhook. Upsert par la clé naturelle `(kind, label)`. Le
- * secret de signature n'est **jamais** en base : `webhookSecretRef` ne porte que le
- * **nom** de la variable d'environnement (§6). Fondation réutilisée par M7.
+ * Fournisseurs externes : amorce **HelloAsso** (cotisations, M6-07) et les terminaux
+ * de caisse **SumUp** / **Zettle** (ventes, M7-03) pour l'ingestion par webhook.
+ * Upsert par la clé naturelle `(kind, label)`. Le secret de signature n'est **jamais**
+ * en base : `webhookSecretRef` ne porte que le **nom** de la variable d'environnement (§6).
  */
 async function seedProviders(): Promise<void> {
   const providers = [
@@ -64,6 +64,16 @@ async function seedProviders(): Promise<void> {
       kind: ExternalProviderKind.HELLOASSO,
       label: "HelloAsso",
       webhookSecretRef: "HELLOASSO_WEBHOOK_SECRET",
+    },
+    {
+      kind: ExternalProviderKind.SUMUP,
+      label: "SumUp",
+      webhookSecretRef: "SUMUP_WEBHOOK_SECRET",
+    },
+    {
+      kind: ExternalProviderKind.ZETTLE,
+      label: "Zettle",
+      webhookSecretRef: "ZETTLE_WEBHOOK_SECRET",
     },
   ] as const;
   for (const p of providers) {
