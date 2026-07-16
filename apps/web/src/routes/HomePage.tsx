@@ -1,7 +1,8 @@
-import { BookOpen, Loader2, LogOut, Package, Wrench } from "lucide-react";
+import { BookOpen, Loader2, LogOut, Package, Users, Wrench } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useLogout } from "@/hooks/useAuth";
+import { canManageMembers } from "@/lib/rbac";
 import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -13,6 +14,8 @@ export function HomePage() {
   if (!user) {
     return null; // garde assurée par RequireAuth
   }
+
+  const canMembers = canManageMembers(user.roles);
 
   return (
     <div className="min-h-screen bg-background">
@@ -48,6 +51,14 @@ export function HomePage() {
               Stock
             </Link>
           </Button>
+          {canMembers ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/members">
+                <Users className="size-5" aria-hidden="true" />
+                Membres
+              </Link>
+            </Button>
+          ) : null}
         </div>
 
         <Card>

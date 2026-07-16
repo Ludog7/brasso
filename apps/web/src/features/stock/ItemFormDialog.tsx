@@ -11,11 +11,11 @@ import { type FormEvent, useState } from "react";
 
 import type { StockItem } from "@/lib/api";
 import { Button } from "@/ui/button";
+import { DialogShell } from "@/ui/dialog-shell";
 import { Input } from "@/ui/input";
 import { Label } from "@/ui/label";
 import { Select } from "@/ui/select";
 
-import { DialogShell } from "./DialogShell";
 import { useCreateItem, useUpdateItem } from "./hooks";
 import { CATEGORY_LABELS, KIND_LABELS, UNIT_LABELS } from "./labels";
 

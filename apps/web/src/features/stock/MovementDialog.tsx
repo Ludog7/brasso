@@ -10,12 +10,12 @@ import { type FormEvent, useState } from "react";
 
 import type { ManualMovementReason, StockItem } from "@/lib/api";
 import { Button } from "@/ui/button";
+import { DialogShell } from "@/ui/dialog-shell";
 import { Input } from "@/ui/input";
 import { Label } from "@/ui/label";
 import { Select } from "@/ui/select";
 import { Textarea } from "@/ui/textarea";
 
-import { DialogShell } from "./DialogShell";
 import { useCreateMovement } from "./hooks";
 import { MOVEMENT_REASON_LABELS, MOVEMENT_REASONS, UNIT_LABELS } from "./labels";
 import { useStockToasts } from "./toast";
