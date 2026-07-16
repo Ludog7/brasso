@@ -43,11 +43,17 @@ export const transactionsRoutes: FastifyPluginAsync<TransactionRoutesOptions> = 
       new AuditService(opts.auditRepository ?? new PrismaAuditRepository(prisma)),
     );
 
-  // Liste « à rapprocher » : ex. ?status=UNMAPPED&kind=MEMBERSHIP, occurredAt desc.
+  // Liste (lecture seule, ADR-09) : ex. ?status=UNMAPPED&kind=SALE&providerId=…, occurredAt desc.
   app.get("/transactions", { config: app.rbac("transactions", "read") }, async (request) => {
     const { limit, offset, ...filters } = transactionListQuery.parse(request.query);
     const { transactions, total } = await service.list({ ...filters, limit, offset });
     return { transactions, total, limit, offset };
+  });
+
+  // Détail normalisé d'une transaction (sans payload brut) — 404 si absente.
+  app.get("/transactions/:id", { config: app.rbac("transactions", "read") }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { transaction: await service.get(id) };
   });
 
   // Rapprochement manuel (repli quand l'auto échoue).

@@ -19,6 +19,8 @@ import { batchesRoutes } from "./modules/batches/routes.js";
 import type { EquipmentRepository } from "./modules/equipment/repository.js";
 import { equipmentRoutes } from "./modules/equipment/routes.js";
 import { healthRoutes } from "./modules/health/routes.js";
+import type { MappingRepository } from "./modules/mapping/repository.js";
+import { mappingRoutes } from "./modules/mapping/routes.js";
 import type { MemberRepository } from "./modules/members/repository.js";
 import { membersRoutes } from "./modules/members/routes.js";
 import type { RecipeRepository } from "./modules/recipes/repository.js";
@@ -66,6 +68,8 @@ export interface BuildAppOptions {
   webhookSecretResolver?: SecretResolver;
   /** Repository transactions/rapprochement injecté (tests) ; sinon adossé à Prisma. */
   transactionRepository?: TransactionRepository;
+  /** Repository mapping SKU injecté (tests) ; sinon adossé à Prisma. */
+  mappingRepository?: MappingRepository;
 }
 
 /**
@@ -127,6 +131,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     new AuditService(auditRepository),
   );
   await app.register(transactionsRoutes, { prefix: "/api", service: transactionService });
+
+  // Mapping SKU↔produit externe (M7-04) : CRUD sous RBAC `mapping` (caisse/admin).
+  // Clé du rapprochement vente→stock (M7-05).
+  await app.register(mappingRoutes, { prefix: "/api", repository: opts.mappingRepository });
 
   // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
   // comme /health et /auth. Fondation générique réutilisée par M7. L'ingestion
