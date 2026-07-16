@@ -68,8 +68,16 @@ export interface TransactionView {
   amountCents: number;
   currency: string;
   paymentMethod: string | null;
+  /** Référence produit du catalogue provider (ventes M7-03) — clé du mapping {{M7-04}}. */
+  externalProductId: string | null;
   status: ExternalTransactionStatus;
   memberId: string | null;
+  /**
+   * Indicateur de **présence** du payload brut (jamais son contenu). Toujours vrai
+   * par l'invariant ADR-09 (append-only : chaque transaction conserve son payload) —
+   * signale au client qu'un original existe côté serveur sans l'exposer.
+   */
+  hasRawPayload: boolean;
   occurredAt: string;
   createdAt: string;
 }
@@ -80,12 +88,21 @@ export class TransactionService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Liste paginée des transactions (filtres status/kind), `occurredAt` desc. */
+  /** Liste paginée des transactions (filtres status/kind/providerId), `occurredAt` desc. */
   async list(
     filters: TransactionListFilters,
   ): Promise<{ transactions: TransactionView[]; total: number }> {
     const { transactions, total } = await this.repo.list(filters);
     return { transactions: transactions.map(toView), total };
+  }
+
+  /** Détail normalisé d'une transaction (sans payload brut) — 404 si absente. */
+  async get(id: string): Promise<TransactionView> {
+    const tx = await this.repo.findById(id);
+    if (!tx) {
+      throw new TransactionNotFoundError(id);
+    }
+    return toView(tx);
   }
 
   /**
@@ -199,8 +216,10 @@ function toView(record: TransactionRecord): TransactionView {
     amountCents: record.amountCents,
     currency: record.currency,
     paymentMethod: record.paymentMethod,
+    externalProductId: record.externalProductId ?? null,
     status: record.status,
     memberId: record.memberId,
+    hasRawPayload: true,
     occurredAt: record.occurredAt.toISOString(),
     createdAt: record.createdAt.toISOString(),
   };

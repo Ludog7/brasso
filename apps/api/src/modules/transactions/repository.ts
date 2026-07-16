@@ -27,6 +27,8 @@ export interface TransactionRecord {
   amountCents: number;
   currency: string;
   paymentMethod: string | null;
+  /** Référence produit du catalogue provider (ventes M7-03) — clé du mapping {{M7-04}}. */
+  externalProductId?: string | null;
   status: ExternalTransactionStatus;
   memberId: string | null;
   occurredAt: Date;
@@ -37,6 +39,7 @@ export interface TransactionRecord {
 export interface TransactionListFilters {
   status?: ExternalTransactionStatus;
   kind?: ExternalTransactionKind;
+  providerId?: string;
   limit: number;
   offset: number;
 }
@@ -84,6 +87,7 @@ const TRANSACTION_SELECT = {
   amountCents: true,
   currency: true,
   paymentMethod: true,
+  externalProductId: true,
   status: true,
   memberId: true,
   occurredAt: true,
@@ -102,6 +106,7 @@ export class PrismaTransactionRepository implements TransactionRepository {
     const where: Prisma.ExternalTransactionWhereInput = {
       ...(filters.status !== undefined ? { status: filters.status } : {}),
       ...(filters.kind !== undefined ? { kind: filters.kind } : {}),
+      ...(filters.providerId !== undefined ? { providerId: filters.providerId } : {}),
     };
     const [transactions, total] = await Promise.all([
       this.db.externalTransaction.findMany({
