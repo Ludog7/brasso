@@ -25,6 +25,10 @@ import type { MemberRepository } from "./modules/members/repository.js";
 import { membersRoutes } from "./modules/members/routes.js";
 import type { RecipeRepository } from "./modules/recipes/repository.js";
 import { recipesRoutes } from "./modules/recipes/routes.js";
+import type { ReconciliationRepository } from "./modules/reconciliation/repository.js";
+import { PrismaReconciliationRepository } from "./modules/reconciliation/repository.js";
+import { reconciliationRoutes } from "./modules/reconciliation/routes.js";
+import { ReconciliationService } from "./modules/reconciliation/service.js";
 import type { CatalogRepository } from "./modules/referentials/repository.js";
 import { referentialsRoutes } from "./modules/referentials/routes.js";
 import type { StockRepository } from "./modules/stock/repository.js";
@@ -70,6 +74,8 @@ export interface BuildAppOptions {
   transactionRepository?: TransactionRepository;
   /** Repository mapping SKU injecté (tests) ; sinon adossé à Prisma. */
   mappingRepository?: MappingRepository;
+  /** Repository rapprochement vente→stock injecté (tests) ; sinon adossé à Prisma. */
+  reconciliationRepository?: ReconciliationRepository;
 }
 
 /**
@@ -136,14 +142,25 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   // Clé du rapprochement vente→stock (M7-05).
   await app.register(mappingRoutes, { prefix: "/api", repository: opts.mappingRepository });
 
+  // Rapprochement vente→stock (M7-05, cœur démo) : service partagé entre le
+  // re-traitement manuel `/transactions/:id/reprocess` et le rapprochement auto
+  // déclenché par le webhook de vente (best-effort).
+  const reconciliationService = new ReconciliationService(
+    opts.reconciliationRepository ?? new PrismaReconciliationRepository(prisma),
+  );
+  await app.register(reconciliationRoutes, { prefix: "/api", service: reconciliationService });
+
   // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
-  // comme /health et /auth. Fondation générique réutilisée par M7. L'ingestion
-  // d'une cotisation déclenche l'auto-rapprochement (best-effort, M6-08).
+  // comme /health et /auth. Fondation générique réutilisée par M7. Une cotisation
+  // déclenche l'auto-rapprochement membre (M6-08) ; une vente, le rapprochement
+  // vente→stock (M7-05). Les deux post-traitements sont best-effort.
   await app.register(webhooksRoutes, {
     repository: opts.webhookRepository,
     secretResolver: opts.webhookSecretResolver,
     onMembershipIngested: ({ transactionId, payerEmail }) =>
       transactionService.autoReconcile(transactionId, payerEmail).then(() => undefined),
+    onSaleIngested: ({ transactionId }) =>
+      reconciliationService.reconcileSale(transactionId).then(() => undefined),
   });
 
   return app;
