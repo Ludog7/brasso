@@ -3,7 +3,12 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 
 import type { WebhookRepository } from "./repository.js";
 import { PrismaWebhookRepository } from "./repository.js";
-import type { SaleIngestResult, SecretResolver, WebhookIngestInput } from "./service.js";
+import type {
+  SaleIngestResult,
+  SecretResolver,
+  WebhookFailureSink,
+  WebhookIngestInput,
+} from "./service.js";
 import { WebhookSecretMisconfiguredError, WebhookService } from "./service.js";
 
 declare module "fastify" {
@@ -39,6 +44,11 @@ export interface WebhookRoutesOptions {
    * une erreur ici est journalisée mais **ne casse pas** l'ingestion (§ADR-09).
    */
   onSaleIngested?: (event: SaleIngestedEvent) => Promise<void>;
+  /**
+   * Émission d'une anomalie `WEBHOOK_FAILURE` sur échec d'ingestion **post-signature**
+   * (M7-06). Best-effort ; jamais appelé sur un échec de signature (bruit/attaques).
+   */
+  onWebhookFailure?: WebhookFailureSink;
 }
 
 /**
@@ -53,7 +63,7 @@ export interface WebhookRoutesOptions {
  */
 export const webhooksRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (app, opts) => {
   const repository = opts.repository ?? new PrismaWebhookRepository(prisma);
-  const service = new WebhookService(repository, opts.secretResolver);
+  const service = new WebhookService(repository, opts.secretResolver, opts.onWebhookFailure);
 
   // Raw body scopé à ce plugin : on garde les octets exacts (signature) tout en
   // exposant le JSON parsé via `request.body`. La `bodyLimit` par défaut (1 Mio)

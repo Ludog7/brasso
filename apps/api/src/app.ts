@@ -6,6 +6,10 @@ import sensible from "@fastify/sensible";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "./config.js";
+import type { AlertRepository } from "./modules/alerts/repository.js";
+import { PrismaAlertRepository } from "./modules/alerts/repository.js";
+import { alertsRoutes } from "./modules/alerts/routes.js";
+import { AlertService } from "./modules/alerts/service.js";
 import type { AuditRepository } from "./modules/audit/repository.js";
 import { PrismaAuditRepository } from "./modules/audit/repository.js";
 import { auditRoutes } from "./modules/audit/routes.js";
@@ -76,6 +80,8 @@ export interface BuildAppOptions {
   mappingRepository?: MappingRepository;
   /** Repository rapprochement vente→stock injecté (tests) ; sinon adossé à Prisma. */
   reconciliationRepository?: ReconciliationRepository;
+  /** Repository anomalies d'intégration injecté (tests) ; sinon adossé à Prisma. */
+  alertRepository?: AlertRepository;
 }
 
 /**
@@ -150,10 +156,16 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   );
   await app.register(reconciliationRoutes, { prefix: "/api", service: reconciliationService });
 
+  // Dashboard des anomalies (M7-06) : service partagé entre les routes `/alerts`
+  // et l'émission d'une `WEBHOOK_FAILURE` sur échec d'ingestion post-signature.
+  const alertService = new AlertService(opts.alertRepository ?? new PrismaAlertRepository(prisma));
+  await app.register(alertsRoutes, { prefix: "/api", service: alertService });
+
   // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
   // comme /health et /auth. Fondation générique réutilisée par M7. Une cotisation
   // déclenche l'auto-rapprochement membre (M6-08) ; une vente, le rapprochement
-  // vente→stock (M7-05). Les deux post-traitements sont best-effort.
+  // vente→stock (M7-05). Les deux post-traitements sont best-effort. Un échec
+  // d'ingestion post-signature émet une anomalie WEBHOOK_FAILURE (M7-06).
   await app.register(webhooksRoutes, {
     repository: opts.webhookRepository,
     secretResolver: opts.webhookSecretResolver,
@@ -161,6 +173,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       transactionService.autoReconcile(transactionId, payerEmail).then(() => undefined),
     onSaleIngested: ({ transactionId }) =>
       reconciliationService.reconcileSale(transactionId).then(() => undefined),
+    onWebhookFailure: (providerId, message) =>
+      alertService.recordWebhookFailure(providerId, message),
   });
 
   return app;
