@@ -6,6 +6,8 @@
 > - `CLAUDE.md` → les **règles** non négociables (ADR, conventions, wording).
 > - `docs/SPEC-ORCHESTRATION.md` → cadrage, ADR détaillés, milestones.
 > - `docs/SPEC-FONCTIONNELLE.md` / `docs/FORMULES-BRASSICOLES.md` → le métier.
+> - `docs/RUNBOOKS.md` → l'**exploitation en production** (installation from scratch,
+>   restauration, rotation des secrets, migrations, incidents, RGPD).
 > - Les mémoires `brasso-avancement-M*` → l'**état d'avancement** courant.
 >
 > But : réduire le « coût d'orientation » (commandes, carte, config) à chaque
