@@ -1074,3 +1074,111 @@ export const contributionsApi = {
       body: JSON.stringify({ memberId }),
     }).then((r) => r.transaction),
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Caisse — mapping SKU & transactions externes (M7-04 api / M7-09 web). Le mapping
+// relie un produit externe (provider) à un article de catalogue → clé du
+// rapprochement vente→stock (M7-05). Les transactions externes sont **read-only**
+// (ADR-09) : le payload brut n'est jamais renvoyé (`hasRawPayload` en indicateur).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Correspondance SKU interne ↔ produit externe (miroir de `MappingRecord` côté API). */
+export interface SkuMapping {
+  id: string;
+  internalSku: string;
+  catalogItemId: string | null;
+  /** Article de catalogue lié (nom/kind pour l'affichage) — `null` si mapping incomplet. */
+  catalogItem: { id: string; name: string; kind: CatalogKind } | null;
+  providerId: string;
+  externalProductId: string;
+  externalCategory: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Corps de création d'un mapping (`catalogItemId` optionnel : mapping incomplet toléré). */
+export interface MappingCreateInput {
+  internalSku: string;
+  catalogItemId?: string | null;
+  providerId: string;
+  externalProductId: string;
+  externalCategory?: string | null;
+}
+
+/** Patch partiel — `catalogItemId: null` détache l'article. */
+export type MappingUpdateInput = Partial<MappingCreateInput>;
+
+export interface MappingListFilters {
+  providerId?: string;
+}
+
+export const mappingApi = {
+  list: (filters: MappingListFilters = {}): Promise<SkuMapping[]> => {
+    const suffix = filters.providerId
+      ? `?providerId=${encodeURIComponent(filters.providerId)}`
+      : "";
+    return request<{ mappings: SkuMapping[] }>(`/api/mappings${suffix}`).then((r) => r.mappings);
+  },
+
+  create: (input: MappingCreateInput): Promise<SkuMapping> =>
+    request<{ mapping: SkuMapping }>("/api/mappings", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.mapping),
+
+  update: (id: string, input: MappingUpdateInput): Promise<SkuMapping> =>
+    request<{ mapping: SkuMapping }>(`/api/mappings/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }).then((r) => r.mapping),
+
+  remove: (id: string): Promise<void> => request<void>(`/api/mappings/${id}`, { method: "DELETE" }),
+};
+
+/** Nature normalisée d'une transaction externe (miroir de `ExternalTransactionKind`). */
+export type ExternalTransactionKind = "SALE" | "MEMBERSHIP" | "DONATION" | "OTHER";
+/** Statut de rapprochement (miroir de `ExternalTransactionStatus`). */
+export type ExternalTransactionStatus = "MAPPED" | "UNMAPPED" | "IGNORED";
+
+/** Vue read-only d'une transaction externe (miroir de `TransactionView` côté API). */
+export interface ExternalTransaction {
+  id: string;
+  providerId: string;
+  externalId: string;
+  kind: ExternalTransactionKind;
+  amountCents: number;
+  currency: string;
+  paymentMethod: string | null;
+  /** Référence produit du catalogue provider (ventes) — clé du mapping. */
+  externalProductId: string | null;
+  status: ExternalTransactionStatus;
+  memberId: string | null;
+  /** Indicateur de présence du payload brut (jamais exposé, ADR-09). */
+  hasRawPayload: boolean;
+  occurredAt: string;
+}
+
+export interface TransactionListFilters {
+  status?: ExternalTransactionStatus;
+  kind?: ExternalTransactionKind;
+  providerId?: string;
+}
+
+export const transactionsApi = {
+  /** Liste read-only filtrable (status/kind/providerId), `occurredAt` desc. */
+  list: (filters: TransactionListFilters = {}): Promise<ExternalTransaction[]> => {
+    const qs = new URLSearchParams();
+    if (filters.status) qs.set("status", filters.status);
+    if (filters.kind) qs.set("kind", filters.kind);
+    if (filters.providerId) qs.set("providerId", filters.providerId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ transactions: ExternalTransaction[] }>(`/api/transactions${suffix}`).then(
+      (r) => r.transactions,
+    );
+  },
+
+  get: (id: string): Promise<ExternalTransaction> =>
+    request<{ transaction: ExternalTransaction }>(`/api/transactions/${id}`).then(
+      (r) => r.transaction,
+    ),
+};
