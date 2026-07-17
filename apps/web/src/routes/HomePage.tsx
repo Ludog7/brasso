@@ -4,6 +4,7 @@ import {
   FileSpreadsheet,
   Loader2,
   LogOut,
+  MonitorPlay,
   Package,
   ScanBarcode,
   ScrollText,
@@ -22,6 +23,7 @@ import {
   canManageMembers,
   canViewAlerts,
   canViewAudit,
+  canViewDisplay,
 } from "@/lib/rbac";
 import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
@@ -43,6 +45,7 @@ export function HomePage() {
   const canCash = canAccessCash(user.roles);
   const canAlerts = canViewAlerts(user.roles);
   const canExports = canExportAccounting(user.roles);
+  const canDisplay = canViewDisplay(user.roles);
   const openAlertCount = openAlerts.data ?? 0;
 
   return (
@@ -108,6 +111,14 @@ export function HomePage() {
                     {openAlertCount}
                   </span>
                 ) : null}
+              </Link>
+            </Button>
+          ) : null}
+          {canDisplay ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/display">
+                <MonitorPlay className="size-5" aria-hidden="true" />
+                Affichage
               </Link>
             </Button>
           ) : null}

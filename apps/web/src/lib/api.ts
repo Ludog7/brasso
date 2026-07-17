@@ -1300,3 +1300,107 @@ export const exportsApi = {
     };
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module d'affichage — configuration (M7-08 api / M7-12 web). Surfaces (Bar/Salle),
+// écrans (template + mentions légales), sélection de produits affichés (indicateurs).
+// RBAC `affichage` : admin CRUD ; brasseur/caisse RU. La vue temps réel (rendu
+// synchronisé au stock) est traitée à part (M7-13, `GET /display/screens/:id/render`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Mode de rendu d'un écran (miroir de `DisplayTemplate`). */
+export type DisplayTemplate = "LIST" | "TABLE" | "CARDS";
+
+/** Surface d'affichage (miroir de `SurfaceRecord` côté API). */
+export interface DisplaySurface {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Corps de création/mise à jour d'une surface (champs vides omis côté UI). */
+export interface SurfaceInput {
+  name: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+/** Écran d'une surface (miroir de `ScreenRecord` côté API). */
+export interface DisplayScreen {
+  id: string;
+  surfaceId: string;
+  name: string;
+  template: DisplayTemplate;
+  legalMentions: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Corps de création/mise à jour d'un écran. `legalMentions` : texte libre (non vide). */
+export interface ScreenInput {
+  name: string;
+  template?: DisplayTemplate;
+  legalMentions?: string;
+  isActive?: boolean;
+}
+
+/** Produit sélectionné sur un écran + ses indicateurs (aligné sur l'API #181). */
+export interface DisplayItemInput {
+  catalogItemId: string;
+  isNew?: boolean;
+  isFavorite?: boolean;
+  isSpecial?: boolean;
+  priceCents?: number | null;
+  sortOrder?: number;
+}
+
+export const displayApi = {
+  listSurfaces: (): Promise<DisplaySurface[]> =>
+    request<{ surfaces: DisplaySurface[] }>("/api/display/surfaces").then((r) => r.surfaces),
+
+  createSurface: (input: SurfaceInput): Promise<DisplaySurface> =>
+    request<{ surface: DisplaySurface }>("/api/display/surfaces", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.surface),
+
+  updateSurface: (id: string, input: Partial<SurfaceInput>): Promise<DisplaySurface> =>
+    request<{ surface: DisplaySurface }>(`/api/display/surfaces/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }).then((r) => r.surface),
+
+  removeSurface: (id: string): Promise<void> =>
+    request<void>(`/api/display/surfaces/${id}`, { method: "DELETE" }),
+
+  listScreens: (surfaceId: string): Promise<DisplayScreen[]> =>
+    request<{ screens: DisplayScreen[] }>(`/api/display/surfaces/${surfaceId}/screens`).then(
+      (r) => r.screens,
+    ),
+
+  createScreen: (surfaceId: string, input: ScreenInput): Promise<DisplayScreen> =>
+    request<{ screen: DisplayScreen }>(`/api/display/surfaces/${surfaceId}/screens`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.screen),
+
+  updateScreen: (id: string, input: Partial<ScreenInput>): Promise<DisplayScreen> =>
+    request<{ screen: DisplayScreen }>(`/api/display/screens/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }).then((r) => r.screen),
+
+  removeScreen: (id: string): Promise<void> =>
+    request<void>(`/api/display/screens/${id}`, { method: "DELETE" }),
+
+  /** Remplace la sélection de produits d'un écran (PUT items). */
+  setItems: (screenId: string, items: DisplayItemInput[]): Promise<{ count: number }> =>
+    request<{ count: number }>(`/api/display/screens/${screenId}/items`, {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    }),
+};
