@@ -6,11 +6,12 @@
  * L'API reste l'autorité.
  */
 
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Monitor, Plus } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import type { DisplayScreen, DisplaySurface } from "@/lib/api";
 import { Badge } from "@/ui/badge";
-import { Button } from "@/ui/button";
+import { Button, buttonVariants } from "@/ui/button";
 import { Card, CardContent } from "@/ui/card";
 
 import { useRemoveScreen, useRemoveSurface, useScreens } from "./hooks";
@@ -117,6 +118,15 @@ function SurfaceCard({
                     {!screen.isActive ? <Badge tone="muted">Inactif</Badge> : null}
                   </div>
                   <div className="flex gap-2">
+                    <Link
+                      to={`/display/screen/${screen.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={buttonVariants({ variant: "outline" })}
+                    >
+                      <Monitor className="size-5" aria-hidden="true" />
+                      Afficher
+                    </Link>
                     {canEdit ? (
                       <>
                         <Button

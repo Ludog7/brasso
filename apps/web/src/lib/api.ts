@@ -1358,6 +1358,43 @@ export interface DisplayItemInput {
   sortOrder?: number;
 }
 
+/** Indicateurs **résolus** d'un produit affiché (miroir de `DisplayItemFlags` core). */
+export interface DisplayItemFlags {
+  isNew: boolean;
+  isFavorite: boolean;
+  isSpecial: boolean;
+}
+
+/**
+ * Produit **projeté** pour le rendu (miroir de `RenderedDisplayItem` core) : disponible
+ * (stock > 0, filtré côté API), trié, flags résolus. `priceCents` en centimes internes.
+ */
+export interface DisplayRenderItem {
+  catalogItemId: string;
+  name: string;
+  priceCents: number | null;
+  flags: DisplayItemFlags;
+  sortOrder: number;
+}
+
+/**
+ * Rendu synchronisé au stock d'un écran (miroir de `ScreenRender` côté API). Seuls les
+ * produits disponibles figurent dans `items`. `syncToken` : empreinte du rendu affiché
+ * (change à tout changement significatif) ; `syncedAt` : instant du calcul (ISO 8601).
+ */
+export interface ScreenRender {
+  screen: {
+    id: string;
+    name: string;
+    template: DisplayTemplate;
+    legalMentions: string | null;
+    surface: { id: string; name: string };
+  };
+  items: DisplayRenderItem[];
+  syncedAt: string;
+  syncToken: string;
+}
+
 export const displayApi = {
   listSurfaces: (): Promise<DisplaySurface[]> =>
     request<{ surfaces: DisplaySurface[] }>("/api/display/surfaces").then((r) => r.surfaces),
@@ -1403,4 +1440,11 @@ export const displayApi = {
       method: "PUT",
       body: JSON.stringify({ items }),
     }),
+
+  /**
+   * Rendu synchronisé au stock d'un écran (M7-13) : produits disponibles + mentions
+   * légales + jeton de sync. Rejette en 404 `DISPLAY_SCREEN_NOT_FOUND` si l'écran est absent.
+   */
+  render: (screenId: string): Promise<ScreenRender> =>
+    request<ScreenRender>(`/api/display/screens/${screenId}/render`),
 };
