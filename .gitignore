@@ -38,6 +38,10 @@ Thumbs.db
 .docker-data/
 pgdata/
 
+# Sauvegardes base (M8-03) — ne jamais versionner un dump (données personnelles, RGPD)
+/backups/
+*.dump
+
 # Playwright
 test-results/
 playwright-report/
