@@ -22,6 +22,8 @@ import type { BatchRepository } from "./modules/batches/repository.js";
 import { batchesRoutes } from "./modules/batches/routes.js";
 import type { EquipmentRepository } from "./modules/equipment/repository.js";
 import { equipmentRoutes } from "./modules/equipment/routes.js";
+import type { ExportRepository } from "./modules/exports/repository.js";
+import { exportsRoutes } from "./modules/exports/routes.js";
 import { healthRoutes } from "./modules/health/routes.js";
 import type { MappingRepository } from "./modules/mapping/repository.js";
 import { mappingRoutes } from "./modules/mapping/routes.js";
@@ -82,6 +84,8 @@ export interface BuildAppOptions {
   reconciliationRepository?: ReconciliationRepository;
   /** Repository anomalies d'intégration injecté (tests) ; sinon adossé à Prisma. */
   alertRepository?: AlertRepository;
+  /** Repository exports CSV injecté (tests) ; sinon adossé à Prisma. */
+  exportRepository?: ExportRepository;
 }
 
 /**
@@ -160,6 +164,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   // et l'émission d'une `WEBHOOK_FAILURE` sur échec d'ingestion post-signature.
   const alertService = new AlertService(opts.alertRepository ?? new PrismaAlertRepository(prisma));
   await app.register(alertsRoutes, { prefix: "/api", service: alertService });
+
+  // Exports CSV comptables (M7-07) : read-only sous RBAC `transactions:read`.
+  await app.register(exportsRoutes, { prefix: "/api", repository: opts.exportRepository });
 
   // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
   // comme /health et /auth. Fondation générique réutilisée par M7. Une cotisation
