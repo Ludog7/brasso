@@ -7,6 +7,7 @@ import { useBootstrapSession } from "@/hooks/useAuth";
 import { AuditPage } from "@/routes/audit/AuditPage";
 import { BatchDetailPage } from "@/routes/batches/BatchDetailPage";
 import { PlanBatchPage } from "@/routes/batches/PlanBatchPage";
+import { CashPage } from "@/routes/cash/CashPage";
 import { ContributionsPage } from "@/routes/contributions/ContributionsPage";
 import { EditEquipmentPage } from "@/routes/equipment/EditEquipmentPage";
 import { EquipmentListPage } from "@/routes/equipment/EquipmentListPage";
@@ -65,6 +66,7 @@ export function App() {
         <Route path="/equipment" element={<EquipmentListPage />} />
         <Route path="/stock" element={<StockPage />} />
         <Route path="/members" element={<MembersPage />} />
+        <Route path="/cash" element={<CashPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/contributions" element={<ContributionsPage />} />
         <Route path="/equipment/new" element={<NewEquipmentPage />} />

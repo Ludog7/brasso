@@ -1,8 +1,18 @@
-import { BookOpen, Coins, Loader2, LogOut, Package, ScrollText, Users, Wrench } from "lucide-react";
+import {
+  BookOpen,
+  Coins,
+  Loader2,
+  LogOut,
+  Package,
+  ScanBarcode,
+  ScrollText,
+  Users,
+  Wrench,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useLogout } from "@/hooks/useAuth";
-import { canListContributions, canManageMembers, canViewAudit } from "@/lib/rbac";
+import { canAccessCash, canListContributions, canManageMembers, canViewAudit } from "@/lib/rbac";
 import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -18,6 +28,7 @@ export function HomePage() {
   const canMembers = canManageMembers(user.roles);
   const canAudit = canViewAudit(user.roles);
   const canContributions = canListContributions(user.roles);
+  const canCash = canAccessCash(user.roles);
 
   return (
     <div className="min-h-screen bg-background">
@@ -58,6 +69,14 @@ export function HomePage() {
               <Link to="/members">
                 <Users className="size-5" aria-hidden="true" />
                 Membres
+              </Link>
+            </Button>
+          ) : null}
+          {canCash ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/cash">
+                <ScanBarcode className="size-5" aria-hidden="true" />
+                Caisse
               </Link>
             </Button>
           ) : null}

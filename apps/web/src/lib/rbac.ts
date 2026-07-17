@@ -29,6 +29,22 @@ export function canListContributions(roles: readonly string[]): boolean {
 }
 
 /**
+ * Accès à l'espace caisse (§3.5, `transactions:read`) : admin/brasseur/caisse —
+ * l'écran (liste transactions + mappings en lecture) est **masqué à `rgpd`**.
+ */
+export function canAccessCash(roles: readonly string[]): boolean {
+  return roles.includes("admin") || roles.includes("brasseur") || roles.includes("caisse");
+}
+
+/**
+ * Gestion des mappings SKU (§3.5, `mapping` CRUD) : `admin`/`caisse`. `brasseur`
+ * voit en lecture (l'UI masque les actions d'écriture ; l'API reste l'autorité).
+ */
+export function canManageMapping(roles: readonly string[]): boolean {
+  return roles.includes("admin") || roles.includes("caisse");
+}
+
+/**
  * Rapprochement d'une cotisation (§3.5, `membres:update` — modifie l'adhésion) :
  * `admin`/`rgpd`. NB : seul `admin` cumule lister (`transactions:read`) **et**
  * rapprocher — l'UI masque le bouton en conséquence.
