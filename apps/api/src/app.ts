@@ -101,6 +101,25 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     logger: { level: process.env.LOG_LEVEL ?? "info" },
   });
 
+  // Corps JSON vide toléré (bug #218) : le client web pose `content-type:
+  // application/json` même sur les POST **sans corps** (logout, publish, archive,
+  // démarrage Jour J…). Le parser par défaut de Fastify rejette un corps vide en
+  // 400 ; on le traite comme « pas de corps » (undefined). Un corps non vide mais
+  // JSON invalide reste refusé en 400.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const text = (typeof body === "string" ? body : body.toString("utf8")).trim();
+    if (text.length === 0) {
+      done(null, undefined);
+      return;
+    }
+    try {
+      done(null, JSON.parse(text));
+    } catch {
+      const err = Object.assign(new Error("Corps JSON invalide"), { statusCode: 400 });
+      done(err, undefined);
+    }
+  });
+
   // Ordre : config d'abord (les autres en dépendent), puis sécurité, rate-limit,
   // gestion d'erreurs, auth, enfin les modules.
   await app.register(configPlugin, { config: opts.config });
