@@ -11,7 +11,14 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
-import { API_PORT, BASE_URL, DATABASE_URL, SESSION_SECRET, WEB_PORT } from "./fixtures/env.js";
+import {
+  API_PORT,
+  BASE_URL,
+  DATABASE_URL,
+  SESSION_SECRET,
+  WEB_PORT,
+  WEBHOOK_SECRETS,
+} from "./fixtures/env.js";
 
 const isCI = !!process.env.CI;
 
@@ -54,6 +61,10 @@ export default defineConfig({
         API_PORT: String(API_PORT),
         DATABASE_URL,
         SESSION_SECRET,
+        // Secrets HMAC résolus par `provider.webhookSecretRef` (M8-06).
+        SUMUP_WEBHOOK_SECRET: WEBHOOK_SECRETS.SUMUP,
+        ZETTLE_WEBHOOK_SECRET: WEBHOOK_SECRETS.ZETTLE,
+        HELLOASSO_WEBHOOK_SECRET: WEBHOOK_SECRETS.HELLOASSO,
       },
     },
     {

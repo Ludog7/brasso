@@ -54,3 +54,27 @@ export const EQUIPMENT_ID = "e2e-equipment-20l";
 /** Famille + version 1 de la recette publiée de parcours (BEER). */
 export const RECIPE_FAMILY_ID = "e2e-family-blonde";
 export const RECIPE_ID = "e2e-recipe-blonde";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hub caisse (M8-06) — article conditionné + mapping SKU + stock initial.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Article de conditionnement vendu au comptoir (unité, stock décrémenté par vente). */
+export const CONDITIONED_ITEM_ID = "e2e-cond-blonde33";
+export const CONDITIONED_ITEM_NAME = "Blonde 33cl (E2E)";
+/** Stock initial (unités) posé au seed → une vente mappée le décrémente de 1. */
+export const CONDITIONED_INITIAL_STOCK = 50;
+
+/** `externalProductId` **mappé** (vente reconnue → mouvement stock). */
+export const MAPPED_SKU = "SKU-BLONDE-33";
+/** `externalProductId` **non mappé** (vente → anomalie, aucun mouvement). */
+export const UNMAPPED_SKU = "SKU-INCONNU-E2E";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cycle adhésion (M8-06) — membre rapproché par email de la cotisation HelloAsso.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const MEMBER_NUMBER = "E2E-0001";
+export const MEMBER_FIRST_NAME = "Ada";
+export const MEMBER_LAST_NAME = "Lovelace";
+export const MEMBER_EMAIL = "ada@brasso.test";

@@ -16,6 +16,20 @@ export const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 4173);
 /** Origine servie au navigateur (front Vite, proxy → API sur la même origine). */
 export const BASE_URL = process.env.E2E_BASE_URL ?? `http://localhost:${WEB_PORT}`;
 
+/** Base directe de l'API (webhooks : appels serveur-à-serveur, hors proxy web). */
+export const API_BASE = process.env.E2E_API_BASE ?? `http://localhost:${API_PORT}`;
+
+/**
+ * Secrets HMAC des webhooks (M8-06). Résolus par l'API via `provider.webhookSecretRef`
+ * (noms d'env `*_WEBHOOK_SECRET`, cf. seed de base) → **doivent être injectés à
+ * l'API** (webServer) sous ces noms, et **partagés** avec le helper qui signe.
+ */
+export const WEBHOOK_SECRETS = {
+  SUMUP: process.env.SUMUP_WEBHOOK_SECRET ?? "e2e-sumup-hmac-secret",
+  ZETTLE: process.env.ZETTLE_WEBHOOK_SECRET ?? "e2e-zettle-hmac-secret",
+  HELLOASSO: process.env.HELLOASSO_WEBHOOK_SECRET ?? "e2e-helloasso-hmac-secret",
+} as const;
+
 /**
  * URL de la base de test. Priorité : `E2E_DATABASE_URL` (poste local), puis
  * `DATABASE_URL` (service Postgres de la CI), puis un défaut CI raisonnable.

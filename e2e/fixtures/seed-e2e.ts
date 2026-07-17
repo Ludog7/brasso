@@ -8,7 +8,9 @@
  * - une **recette BEER publiée** (aucune règle de publication `core` sur BEER)
  *   avec un ingrédient catalogué (→ réservation de stock) et des étapes qui
  *   produisent un plan Jour J court : empâtage → ébullition → fermentation ;
- * - un **mouvement de stock** d'appro pour couvrir la réservation (pas d'alerte).
+ * - un **mouvement de stock** d'appro pour couvrir la réservation (pas d'alerte) ;
+ * - (M8-06, hub caisse) un **article conditionné** + stock + **mapping SKU** SumUp ;
+ * - (M8-06, adhésion) un **membre** `EN_RETARD` rapprochable par email HelloAsso.
  *
  * Idempotent : upserts sur clés stables ; la recette est recréée à l'identique.
  */
@@ -19,8 +21,16 @@ import { hash } from "@node-rs/argon2";
 import {
   type Account,
   ACCOUNTS,
+  CONDITIONED_INITIAL_STOCK,
+  CONDITIONED_ITEM_ID,
+  CONDITIONED_ITEM_NAME,
   EQUIPMENT_ID,
   MALT_CATALOG_ID,
+  MAPPED_SKU,
+  MEMBER_EMAIL,
+  MEMBER_FIRST_NAME,
+  MEMBER_LAST_NAME,
+  MEMBER_NUMBER,
   RECIPE_FAMILY_ID,
   RECIPE_ID,
 } from "./accounts.js";
@@ -160,6 +170,73 @@ async function seedStock(): Promise<void> {
   });
 }
 
+/**
+ * Hub caisse (M8-06) : article conditionné vendu au comptoir + **mapping SKU**
+ * (SumUp `externalProductId` → article) + stock initial. Une vente **mappée**
+ * décrémente cet article ; une vente sur un SKU **absent** de ce mapping devient
+ * une anomalie.
+ */
+async function seedHubCaisse(): Promise<void> {
+  await prisma.catalogItem.upsert({
+    where: { id: CONDITIONED_ITEM_ID },
+    create: {
+      id: CONDITIONED_ITEM_ID,
+      name: CONDITIONED_ITEM_NAME,
+      kind: "CONDITIONNEMENT",
+      unit: "UNIT",
+      defaultUnitCostCents: 150,
+      isActive: true,
+    },
+    update: { name: CONDITIONED_ITEM_NAME, isActive: true },
+  });
+  await prisma.stockMovement.create({
+    data: {
+      catalogItemId: CONDITIONED_ITEM_ID,
+      delta: CONDITIONED_INITIAL_STOCK,
+      reason: "PURCHASE",
+      note: "Appro conditionné E2E",
+    },
+  });
+
+  const sumup = await prisma.externalProvider.findFirstOrThrow({ where: { kind: "SUMUP" } });
+  await prisma.skuMapping.upsert({
+    where: {
+      providerId_externalProductId: { providerId: sumup.id, externalProductId: MAPPED_SKU },
+    },
+    create: {
+      internalSku: "E2E-BLONDE-33",
+      providerId: sumup.id,
+      externalProductId: MAPPED_SKU,
+      catalogItemId: CONDITIONED_ITEM_ID,
+    },
+    update: { catalogItemId: CONDITIONED_ITEM_ID },
+  });
+}
+
+/**
+ * Cycle adhésion (M8-06) : un membre **sans cotisation** (statut initial
+ * `EN_RETARD`), rapproché par **email** de la cotisation HelloAsso → `A_JOUR`.
+ */
+async function seedMember(): Promise<void> {
+  await prisma.member.upsert({
+    where: { memberNumber: MEMBER_NUMBER },
+    create: {
+      memberNumber: MEMBER_NUMBER,
+      firstName: MEMBER_FIRST_NAME,
+      lastName: MEMBER_LAST_NAME,
+      email: MEMBER_EMAIL,
+      membership: "EN_RETARD",
+    },
+    update: {
+      firstName: MEMBER_FIRST_NAME,
+      lastName: MEMBER_LAST_NAME,
+      email: MEMBER_EMAIL,
+      membership: "EN_RETARD",
+      lastContributionAt: null,
+    },
+  });
+}
+
 /** Point d'entrée : amorce l'ensemble des données de parcours E2E. */
 export async function seedE2E(): Promise<void> {
   for (const account of Object.values(ACCOUNTS)) {
@@ -168,4 +245,6 @@ export async function seedE2E(): Promise<void> {
   await seedEquipment();
   await seedPublishedRecipe();
   await seedStock();
+  await seedHubCaisse();
+  await seedMember();
 }
