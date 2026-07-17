@@ -68,3 +68,6 @@ export * from "./members/index.js";
 
 // Helpers purs hub caisse & affichage — rapprochement vente↔stock, CSV compta, rendu écran (M7-01, §3.6).
 export * from "./hub/index.js";
+
+// Calculateurs d'atelier autonomes — starter, eau, dilution, BIAB (M8-01, FORMULES §6/§9.3/§12).
+export * from "./calculators/index.js";

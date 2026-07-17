@@ -517,10 +517,74 @@ realAttenuation(ogMeasured, fgMeasured): number
 dilute(sg1, v1, v2): number
 blend(sgA, vA, sgB, vB): number
 
+// calculateurs autonomes (M8, §12)
+computeStarter(input): { platoOfWort, pitchRate, cellsRequiredB, cellsAvailableB, deficitB, recommendedStarterL }
+computeBiab(input): { totalWaterL, absorptionL, mashRatioLPerKg, strikeTempC }
+computeWaterPlan(input): { mashWaterL, spargeWaterL, totalWaterL, strikeTempC }
+dilutionWaterToTarget(input): { finalVolumeL, waterToAddL }
+
 // conversions (units.ts)
 gToKg, gToLb, lToGal, cToF, fToC, sgToPlato, platoToSg,
 srmToEbc, ebcToSrm, psiToBar, barToPsi
 ```
+
+---
+
+## 12. Calculateurs autonomes (M8)
+
+Outils d'atelier **indépendants** d'une recette ou d'un batch (M8-01). La **dilution**
+(§9.3 `dilute`, + son inverse ci-dessous), l'**eau** (§6.1/6.2/6.3) et le **blending**
+(§9.4) réutilisent les formules existantes ; seuls le **starter** (§12.1) et le **BIAB**
+(§12.2) introduisent des formules nouvelles.
+
+### 12.1 Starter / taux d'inoculation levure
+
+Cellules **requises** (en milliards, ×10⁹) pour un moût de volume `V` (L) et densité `OG` :
+
+```
+°P            = sgToPlato(OG)                    // §0.1
+tauxInoc      = million de cellules / mL / °P    // référence : ale 0.75, lager 1.5
+cellulesReq   = tauxInoc × V(L) × °P             // en milliards (×10⁹)
+```
+
+Le facteur découle de `cellules[×10⁹] = tauxInoc[M/mL/°P] × V[mL] × °P / 1000`, avec
+`V[mL] = V[L] × 1000`. Cellules **disponibles** :
+
+```
+cellulesDispo = nbUnités × cellulesParUnité(×10⁹) × viabilité   // viabilité ∈ [0,1]
+```
+
+Repères : sachet de levure sèche ≈ 200·10⁹ cellules ; pack liquide frais ≈ 100·10⁹ ;
+viabilité liquide ≈ −0,7 %/jour depuis la production (indicatif). **Déficit** et **pied
+de cuve** recommandé :
+
+```
+déficit         = max(0, cellulesReq − cellulesDispo)
+starterRecommL  = déficit / 200                  // plafond stir-plate ≈ 200·10⁹ cellules/L
+```
+
+Le plafond de **200·10⁹ cellules par litre** de starter (agitation/stir-plate) est un
+**majorant prudent** : aide à la décision, **pas** une garantie de croissance (ADR-11).
+
+**Valeur de référence** : ale, `V = 20 L`, `OG = 1.048` → `°P ≈ 11.9`,
+`cellulesReq ≈ 0.75 × 20 × 11.9 ≈ 178·10⁹` ; avec 1 pack liquide à 100·10⁹ (viab. 1),
+`déficit ≈ 78·10⁹`, `starterRecomm ≈ 0.39 L`.
+
+### 12.2 BIAB (Brew In A Bag — une seule cuve, sans rinçage)
+
+Brassage « tout-en-un » : toute l'eau tient dans une seule cuve, **pas de rinçage**.
+L'eau totale couvre le volume pré-ébullition visé, l'eau retenue par la drêche et le
+volume mort :
+
+```
+absorption   = GRAIN_ABSORPTION(1.0 L/kg) × masseGrainsKg
+eauTotaleL   = volPreBoilL + absorption + volumeMortL
+ratioLkg     = eauTotaleL / masseGrainsKg        // maische « fine » (toute l'eau)
+Tstrike      = (0.41 / ratioLkg) × (Tcible − Tgrain) + Tcible   // §6.3
+```
+
+**Valeur de référence** : `grain = 5 kg`, `volPreBoil = 30 L`, `volumeMort = 0` →
+`absorption = 5 L`, `eauTotale = 35 L`, `ratio = 7.0 L/kg`.
 
 ---
 
@@ -565,6 +629,8 @@ export const GRAIN_ABSORPTION = 1.0;      // L/kg retenu par la drêche
 - **Couleur** : équation de Dan Morey (MCU → SRM).
 - **Réfractomètre** : facteur de correction moût ~1.04 ; correction post-fermentation par la **régression cubique de Sean Terrill**, considérée comme la plus précise par la communauté.
 - **Carbonatation forcée** : régression pression/température/volumes CO₂ (loi de Henry) ; volumes par style selon tables grand public.
+- **Starter / taux d'inoculation** : Chris White & Jamil Zainasheff, *Yeast* (2010) ; taux usuels (ale ≈ 0,75 ; lager ≈ 1,5 million cellules/mL/°P) et plafond stir-plate ≈ 200·10⁹ cellules/L (conventions Mr Malty, Jamil Zainasheff). Aide à la décision — la croissance réelle dépend de l'oxygénation et de la souche.
+- **BIAB** : méthode « Brew In A Bag » (brassage une seule cuve, sans rinçage).
 
 > Le développeur doit **valider chaque formule contre au moins une recette documentée** avant de la considérer comme acquise (cf. exigence de tests du plan technique, §8).
 
