@@ -61,6 +61,14 @@ export function canResolveAlerts(roles: readonly string[]): boolean {
 }
 
 /**
+ * Téléchargement des exports CSV comptables (§3.6, `transactions:read`) :
+ * admin/brasseur/caisse — écran **masqué à `rgpd`**.
+ */
+export function canExportAccounting(roles: readonly string[]): boolean {
+  return roles.includes("admin") || roles.includes("brasseur") || roles.includes("caisse");
+}
+
+/**
  * Rapprochement d'une cotisation (§3.5, `membres:update` — modifie l'adhésion) :
  * `admin`/`rgpd`. NB : seul `admin` cumule lister (`transactions:read`) **et**
  * rapprocher — l'UI masque le bouton en conséquence.

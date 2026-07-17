@@ -13,6 +13,7 @@ import { ContributionsPage } from "@/routes/contributions/ContributionsPage";
 import { EditEquipmentPage } from "@/routes/equipment/EditEquipmentPage";
 import { EquipmentListPage } from "@/routes/equipment/EquipmentListPage";
 import { NewEquipmentPage } from "@/routes/equipment/NewEquipmentPage";
+import { ExportsPage } from "@/routes/exports/ExportsPage";
 import { HomePage } from "@/routes/HomePage";
 import { LoginPage } from "@/routes/LoginPage";
 import { MembersPage } from "@/routes/members/MembersPage";
@@ -69,6 +70,7 @@ export function App() {
         <Route path="/members" element={<MembersPage />} />
         <Route path="/cash" element={<CashPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/exports" element={<ExportsPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/contributions" element={<ContributionsPage />} />
         <Route path="/equipment/new" element={<NewEquipmentPage />} />
