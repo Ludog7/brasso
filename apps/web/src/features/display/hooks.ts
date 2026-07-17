@@ -13,6 +13,8 @@ export const displayKeys = {
   all: ["display"] as const,
   surfaces: ["display", "surfaces"] as const,
   screens: (surfaceId: string) => ["display", "screens", surfaceId] as const,
+  /** Rendu temps réel d'un écran (M7-13) — sous la racine `display` (invalidable). */
+  render: (screenId: string) => ["display", "render", screenId] as const,
 };
 
 export function useSurfaces(enabled = true) {
