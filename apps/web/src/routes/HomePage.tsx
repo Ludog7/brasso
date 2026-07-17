@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Coins,
+  FileSpreadsheet,
   Loader2,
   LogOut,
   Package,
@@ -16,6 +17,7 @@ import { useOpenAlertsCount } from "@/features/alerts/hooks";
 import { useLogout } from "@/hooks/useAuth";
 import {
   canAccessCash,
+  canExportAccounting,
   canListContributions,
   canManageMembers,
   canViewAlerts,
@@ -40,6 +42,7 @@ export function HomePage() {
   const canContributions = canListContributions(user.roles);
   const canCash = canAccessCash(user.roles);
   const canAlerts = canViewAlerts(user.roles);
+  const canExports = canExportAccounting(user.roles);
   const openAlertCount = openAlerts.data ?? 0;
 
   return (
@@ -105,6 +108,14 @@ export function HomePage() {
                     {openAlertCount}
                   </span>
                 ) : null}
+              </Link>
+            </Button>
+          ) : null}
+          {canExports ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/exports">
+                <FileSpreadsheet className="size-5" aria-hidden="true" />
+                Exports
               </Link>
             </Button>
           ) : null}

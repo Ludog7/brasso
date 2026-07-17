@@ -1245,3 +1245,58 @@ export const alertsApi = {
       body: JSON.stringify(stockAdjustment ? { stockAdjustment } : {}),
     }).then((r) => r.alert),
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exports CSV comptables (M7-07 api / M7-11 web). Téléchargement **authentifié**
+// (cookie de session, comme les autres appels) : on récupère le blob `text/csv`
+// puis on déclenche le download côté navigateur — jamais d'ouverture en onglet non
+// authentifié. RBAC `transactions:read`. Read-only (ADR-09).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Type d'export comptable (endpoint `/api/exports/<type>.csv`). */
+export type ExportType = "sales" | "contributions" | "movements";
+
+/** Bornes de période d'un export (dates `YYYY-MM-DD`, optionnelles → mois courant côté API). */
+export interface ExportRange {
+  from?: string;
+  to?: string;
+}
+
+/** Fichier téléchargé : contenu brut + nom proposé par l'API + type MIME. */
+export interface DownloadedFile {
+  filename: string;
+  content: string;
+  contentType: string;
+}
+
+export const exportsApi = {
+  /** Télécharge le CSV d'un type d'export sur une période (fetch authentifié → blob). */
+  download: async (type: ExportType, range: ExportRange = {}): Promise<DownloadedFile> => {
+    const qs = new URLSearchParams();
+    if (range.from) qs.set("from", range.from);
+    if (range.to) qs.set("to", range.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/exports/${type}.csv${suffix}`, { credentials: "include" });
+    } catch {
+      throw new ApiError(0, "NETWORK", "Impossible de joindre le serveur");
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as ApiErrorBody | null;
+      throw new ApiError(
+        res.status,
+        body?.error?.code ?? "ERROR",
+        body?.error?.message ?? res.statusText,
+        body?.error?.details,
+      );
+    }
+    const content = await res.text();
+    return {
+      filename: filenameFromDisposition(res.headers.get("content-disposition")) ?? `${type}.csv`,
+      content,
+      contentType: res.headers.get("content-type") ?? "text/csv",
+    };
+  },
+};
