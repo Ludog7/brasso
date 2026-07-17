@@ -20,6 +20,8 @@ import type { DayRepository } from "./modules/batches/day.repository.js";
 import { batchDayRoutes } from "./modules/batches/day.routes.js";
 import type { BatchRepository } from "./modules/batches/repository.js";
 import { batchesRoutes } from "./modules/batches/routes.js";
+import type { DisplayRepository } from "./modules/display/repository.js";
+import { displayRoutes } from "./modules/display/routes.js";
 import type { EquipmentRepository } from "./modules/equipment/repository.js";
 import { equipmentRoutes } from "./modules/equipment/routes.js";
 import type { ExportRepository } from "./modules/exports/repository.js";
@@ -86,6 +88,8 @@ export interface BuildAppOptions {
   alertRepository?: AlertRepository;
   /** Repository exports CSV injecté (tests) ; sinon adossé à Prisma. */
   exportRepository?: ExportRepository;
+  /** Repository module d'affichage injecté (tests) ; sinon adossé à Prisma. */
+  displayRepository?: DisplayRepository;
 }
 
 /**
@@ -167,6 +171,11 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   // Exports CSV comptables (M7-07) : read-only sous RBAC `transactions:read`.
   await app.register(exportsRoutes, { prefix: "/api", repository: opts.exportRepository });
+
+  // Module d'affichage (M7-08) : CRUD surfaces/écrans/produits + rendu synchronisé
+  // au stock sous RBAC `affichage` (admin CRUD ; brasseur/caisse RU). Le rendu
+  // n'expose que les produits disponibles (stock > 0) — base de la vue temps réel (M7-13).
+  await app.register(displayRoutes, { prefix: "/api", repository: opts.displayRepository });
 
   // Webhooks (M6-07) : route PUBLIQUE (signature = auth), hors préfixe `/api`
   // comme /health et /auth. Fondation générique réutilisée par M7. Une cotisation
