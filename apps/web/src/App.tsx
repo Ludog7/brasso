@@ -8,6 +8,7 @@ import { AlertsPage } from "@/routes/alerts/AlertsPage";
 import { AuditPage } from "@/routes/audit/AuditPage";
 import { BatchDetailPage } from "@/routes/batches/BatchDetailPage";
 import { PlanBatchPage } from "@/routes/batches/PlanBatchPage";
+import { CalculatorsPage } from "@/routes/calculators/CalculatorsPage";
 import { CashPage } from "@/routes/cash/CashPage";
 import { ContributionsPage } from "@/routes/contributions/ContributionsPage";
 import { DisplayConfigPage } from "@/routes/display/DisplayConfigPage";
@@ -69,6 +70,7 @@ export function App() {
         <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
         <Route path="/equipment" element={<EquipmentListPage />} />
         <Route path="/stock" element={<StockPage />} />
+        <Route path="/calculators" element={<CalculatorsPage />} />
         <Route path="/members" element={<MembersPage />} />
         <Route path="/cash" element={<CashPage />} />
         <Route path="/alerts" element={<AlertsPage />} />

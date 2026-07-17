@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Calculator,
   Coins,
   FileSpreadsheet,
   Loader2,
@@ -80,6 +81,12 @@ export function HomePage() {
             <Link to="/stock">
               <Package className="size-5" aria-hidden="true" />
               Stock
+            </Link>
+          </Button>
+          <Button asChild size="lg" variant="outline" className="self-start">
+            <Link to="/calculators">
+              <Calculator className="size-5" aria-hidden="true" />
+              Calculateurs
             </Link>
           </Button>
           {canMembers ? (
