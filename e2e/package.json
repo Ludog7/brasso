@@ -1,0 +1,22 @@
+{
+  "name": "@brasso/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tests end-to-end Playwright (parcours critiques M8-05/06)",
+  "scripts": {
+    "pretest:e2e": "pnpm --filter @brasso/core build && pnpm --filter @brasso/db build",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@brasso/db": "workspace:*",
+    "@node-rs/argon2": "^2.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.0"
+  }
+}

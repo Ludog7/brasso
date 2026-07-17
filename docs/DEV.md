@@ -30,7 +30,7 @@
 | DB | **Prisma 6** + **PostgreSQL 16** | `packages/db` |
 | Web | **React 18** + **Vite 5** + **Tailwind 4** + shadcn/ui, **TanStack Query 5**, **Zustand 5**, react-router 6, `vite-plugin-pwa` | `apps/web` |
 | Core | TS pur (zéro dep UI/DB), Zod, `fast-xml-parser` (BeerXML) | `packages/core` |
-| Tests | **Vitest** partout. E2E Playwright : **prévu** (spec §1), pas encore câblé. | |
+| Tests | **Vitest** partout (unitaire/intégration). **E2E Playwright** câblé dans `e2e/` (parcours critiques, M8-05+). | `apps/*/tests`, `e2e/` |
 | Infra | Docker Compose (app + postgres + caddy), Caddy (TLS auto) | `docker-compose*.yml`, `Caddyfile` |
 
 Détail complet : `SPEC-ORCHESTRATION.md` §1.
@@ -77,6 +77,7 @@ le seed lisent la racine via `--env-file=../../.env`.
 | **Core + couverture** | `pnpm --filter @brasso/core test:coverage` |
 | API en watch | `pnpm --filter @brasso/api dev` |
 | Web en watch | `pnpm --filter @brasso/web dev` |
+| **E2E (Playwright)** | `pnpm test:e2e` (base de test **isolée** ; setup + prérequis : `e2e/README.md`) |
 | Format (avant push) | `pnpm format` (écrit) · `pnpm format:check` (CI) |
 | Prisma | `db:migrate` (dev) · `db:deploy` (prod) · `db:seed` · `db:reset` · `db:studio` · `db:generate` |
 
@@ -91,6 +92,7 @@ l'ordre** (reproductibles en local pour éviter un aller-retour) :
 4. `pnpm typecheck` ← `tsc --noEmit`
 5. `pnpm test` ← Vitest. **Gate couverture `core` ≥ 90 %** (lines/branches/functions/statements) via `packages/core/vitest.config.ts`
 6. `pnpm build`
+7. `pnpm test:e2e` ← **Playwright** (M8-05) : install chromium puis parcours critiques contre l'app réelle (front + API + Postgres). Intégré au check `ci` → **bloquant** ; artefacts (trace/vidéo/rapport) uploadés à l'échec.
 
 `main` est protégée : merge par PR uniquement, **CI verte**, **squash** only.
 
