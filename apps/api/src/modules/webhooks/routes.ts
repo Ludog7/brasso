@@ -67,7 +67,9 @@ export const webhooksRoutes: FastifyPluginAsync<WebhookRoutesOptions> = async (a
 
   // Raw body scopé à ce plugin : on garde les octets exacts (signature) tout en
   // exposant le JSON parsé via `request.body`. La `bodyLimit` par défaut (1 Mio)
-  // borne la taille (au-delà → 413).
+  // borne la taille (au-delà → 413). On retire d'abord le parser JSON hérité du
+  // root (bug #218) — encapsulé, ce retrait ne concerne que les routes webhooks.
+  app.removeContentTypeParser("application/json");
   app.addContentTypeParser(
     "application/json",
     { parseAs: "buffer" },
