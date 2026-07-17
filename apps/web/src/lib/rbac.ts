@@ -69,6 +69,23 @@ export function canExportAccounting(roles: readonly string[]): boolean {
 }
 
 /**
+ * Accès + **mise à jour** de la configuration d'affichage (§3.5, `affichage` RU) :
+ * admin/brasseur/caisse. Couvre édition d'écran et sélection de produits. Masqué `rgpd`.
+ */
+export function canViewDisplay(roles: readonly string[]): boolean {
+  return roles.includes("admin") || roles.includes("brasseur") || roles.includes("caisse");
+}
+
+/**
+ * Création / suppression de surfaces et d'écrans (§3.5, `affichage` CRUD) : `admin`
+ * seul. `brasseur`/`caisse` ont RU (édition) mais pas create/delete — l'UI masque
+ * ces actions ; l'API reste l'autorité.
+ */
+export function canAdminDisplay(roles: readonly string[]): boolean {
+  return roles.includes("admin");
+}
+
+/**
  * Rapprochement d'une cotisation (§3.5, `membres:update` — modifie l'adhésion) :
  * `admin`/`rgpd`. NB : seul `admin` cumule lister (`transactions:read`) **et**
  * rapprocher — l'UI masque le bouton en conséquence.

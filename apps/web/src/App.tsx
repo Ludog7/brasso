@@ -10,6 +10,7 @@ import { BatchDetailPage } from "@/routes/batches/BatchDetailPage";
 import { PlanBatchPage } from "@/routes/batches/PlanBatchPage";
 import { CashPage } from "@/routes/cash/CashPage";
 import { ContributionsPage } from "@/routes/contributions/ContributionsPage";
+import { DisplayConfigPage } from "@/routes/display/DisplayConfigPage";
 import { EditEquipmentPage } from "@/routes/equipment/EditEquipmentPage";
 import { EquipmentListPage } from "@/routes/equipment/EquipmentListPage";
 import { NewEquipmentPage } from "@/routes/equipment/NewEquipmentPage";
@@ -71,6 +72,7 @@ export function App() {
         <Route path="/cash" element={<CashPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/exports" element={<ExportsPage />} />
+        <Route path="/display" element={<DisplayConfigPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/contributions" element={<ContributionsPage />} />
         <Route path="/equipment/new" element={<NewEquipmentPage />} />
