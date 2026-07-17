@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { DayScreen } from "@/features/day/DayScreen";
 import { useBootstrapSession } from "@/hooks/useAuth";
+import { AlertsPage } from "@/routes/alerts/AlertsPage";
 import { AuditPage } from "@/routes/audit/AuditPage";
 import { BatchDetailPage } from "@/routes/batches/BatchDetailPage";
 import { PlanBatchPage } from "@/routes/batches/PlanBatchPage";
@@ -67,6 +68,7 @@ export function App() {
         <Route path="/stock" element={<StockPage />} />
         <Route path="/members" element={<MembersPage />} />
         <Route path="/cash" element={<CashPage />} />
+        <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/contributions" element={<ContributionsPage />} />
         <Route path="/equipment/new" element={<NewEquipmentPage />} />

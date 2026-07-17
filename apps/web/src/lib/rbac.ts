@@ -45,6 +45,22 @@ export function canManageMapping(roles: readonly string[]): boolean {
 }
 
 /**
+ * Consultation du dashboard des anomalies d'intégration (§3.6, `transactions:read`) :
+ * admin/brasseur/caisse — écran **masqué à `rgpd`**.
+ */
+export function canViewAlerts(roles: readonly string[]): boolean {
+  return roles.includes("admin") || roles.includes("brasseur") || roles.includes("caisse");
+}
+
+/**
+ * Résolution d'une anomalie (§3.6, `mapping:update` — l'ajustement de stock manuel
+ * est du même ressort que le mapping) : `admin`/`caisse`. `brasseur` voit sans agir.
+ */
+export function canResolveAlerts(roles: readonly string[]): boolean {
+  return roles.includes("admin") || roles.includes("caisse");
+}
+
+/**
  * Rapprochement d'une cotisation (§3.5, `membres:update` — modifie l'adhésion) :
  * `admin`/`rgpd`. NB : seul `admin` cumule lister (`transactions:read`) **et**
  * rapprocher — l'UI masque le bouton en conséquence.

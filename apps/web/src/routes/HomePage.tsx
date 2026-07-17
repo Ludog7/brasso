@@ -6,13 +6,21 @@ import {
   Package,
   ScanBarcode,
   ScrollText,
+  TriangleAlert,
   Users,
   Wrench,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { useOpenAlertsCount } from "@/features/alerts/hooks";
 import { useLogout } from "@/hooks/useAuth";
-import { canAccessCash, canListContributions, canManageMembers, canViewAudit } from "@/lib/rbac";
+import {
+  canAccessCash,
+  canListContributions,
+  canManageMembers,
+  canViewAlerts,
+  canViewAudit,
+} from "@/lib/rbac";
 import { useSession } from "@/stores/session";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -20,6 +28,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 export function HomePage() {
   const user = useSession((s) => s.user);
   const logout = useLogout();
+  // Compteur d'anomalies ouvertes (hook appelé avant tout retour anticipé — règles des hooks).
+  const openAlerts = useOpenAlertsCount(user ? canViewAlerts(user.roles) : false);
 
   if (!user) {
     return null; // garde assurée par RequireAuth
@@ -29,6 +39,8 @@ export function HomePage() {
   const canAudit = canViewAudit(user.roles);
   const canContributions = canListContributions(user.roles);
   const canCash = canAccessCash(user.roles);
+  const canAlerts = canViewAlerts(user.roles);
+  const openAlertCount = openAlerts.data ?? 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -77,6 +89,22 @@ export function HomePage() {
               <Link to="/cash">
                 <ScanBarcode className="size-5" aria-hidden="true" />
                 Caisse
+              </Link>
+            </Button>
+          ) : null}
+          {canAlerts ? (
+            <Button asChild size="lg" variant="outline" className="self-start">
+              <Link to="/alerts">
+                <TriangleAlert className="size-5" aria-hidden="true" />
+                Anomalies
+                {openAlertCount > 0 ? (
+                  <span
+                    className="ml-1 inline-flex min-w-6 items-center justify-center rounded-full bg-amber-500/20 px-2 py-0.5 text-sm font-semibold text-amber-300"
+                    aria-label={`${openAlertCount} anomalie(s) ouverte(s)`}
+                  >
+                    {openAlertCount}
+                  </span>
+                ) : null}
               </Link>
             </Button>
           ) : null}
