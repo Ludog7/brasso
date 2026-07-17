@@ -1182,3 +1182,66 @@ export const transactionsApi = {
       (r) => r.transaction,
     ),
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Anomalies d'intégration (M7-06 api / M7-10 web). Dashboard du mode dégradé :
+// ventes non mappées & webhooks en échec. Lecture `transactions:read` ; résolution
+// (bascule `RESOLVED` + ajustement de stock manuel optionnel) `mapping:update`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Type d'anomalie (miroir de `IntegrationAlertType`). */
+export type IntegrationAlertType = "UNMAPPED_TRANSACTION" | "WEBHOOK_FAILURE";
+/** Statut d'une anomalie (miroir de `IntegrationAlertStatus`). */
+export type IntegrationAlertStatus = "OPEN" | "RESOLVED";
+
+/** Anomalie d'intégration + contexte (miroir de `AlertRecord` côté API). */
+export interface IntegrationAlert {
+  id: string;
+  type: IntegrationAlertType;
+  status: IntegrationAlertStatus;
+  message: string;
+  providerId: string | null;
+  provider: { label: string } | null;
+  transactionId: string | null;
+  /** Contexte de la transaction liée (montant/date/produit) — `null` si non rattachée. */
+  transaction: {
+    amountCents: number;
+    currency: string;
+    occurredAt: string;
+    externalProductId: string | null;
+  } | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+/** Ajustement de stock **manuel** joint à une résolution (registre M5, `delta` non nul). */
+export interface AlertStockAdjustment {
+  catalogItemId: string;
+  delta: number;
+  note?: string;
+}
+
+export interface AlertListFilters {
+  status?: IntegrationAlertStatus;
+  type?: IntegrationAlertType;
+}
+
+export const alertsApi = {
+  list: (filters: AlertListFilters = {}): Promise<IntegrationAlert[]> => {
+    const qs = new URLSearchParams();
+    if (filters.status) qs.set("status", filters.status);
+    if (filters.type) qs.set("type", filters.type);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ alerts: IntegrationAlert[] }>(`/api/alerts${suffix}`).then((r) => r.alerts);
+  },
+
+  get: (id: string): Promise<IntegrationAlert> =>
+    request<{ alert: IntegrationAlert }>(`/api/alerts/${id}`).then((r) => r.alert),
+
+  /** Résout une anomalie (idempotent) avec ajustement de stock manuel optionnel. */
+  resolve: (id: string, stockAdjustment?: AlertStockAdjustment): Promise<IntegrationAlert> =>
+    request<{ alert: IntegrationAlert }>(`/api/alerts/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(stockAdjustment ? { stockAdjustment } : {}),
+    }).then((r) => r.alert),
+};
