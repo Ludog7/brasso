@@ -105,14 +105,14 @@ beforeEach(() => {
   ];
   volumes = { ...VOLUMES };
   failVolumes = false;
-  useSession.setState({ user: USER, status: "authenticated" });
+  useSession.setState({ user: USER });
   installFetch();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  useSession.setState({ user: null, status: "anonymous" });
+  useSession.setState({ user: null });
 });
 
 describe("frise des jalons du cycle (M9-10 §B)", () => {

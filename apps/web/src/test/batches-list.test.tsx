@@ -93,14 +93,14 @@ beforeEach(() => {
   failList = false;
   lastUrl = "";
   listCalls = 0;
-  useSession.setState({ user: USER, status: "authenticated" });
+  useSession.setState({ user: USER });
   installFetch();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  useSession.setState({ user: null, status: "anonymous" });
+  useSession.setState({ user: null });
 });
 
 describe("vue « Brassins » (M9-10)", () => {
