@@ -27,6 +27,7 @@ export const PHASE_LABELS: Record<Phase, string> = {
   MASH: "Empâtage",
   LAUTER: "Filtration",
   BOIL: "Ébullition",
+  WHIRLPOOL: "Whirlpool",
   COOLING: "Refroidissement",
   PITCHING: "Ensemencement",
 };

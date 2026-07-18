@@ -16,6 +16,7 @@ import type {
   Measurement,
   MeasurementKind,
   StepSpec,
+  StepValidationCheck,
   TransitionResult,
 } from "./types.js";
 
@@ -53,6 +54,88 @@ function missingMeasurements(state: DayState, step: StepSpec): readonly Measurem
   const required = step.requiredMeasurements ?? [];
   const present = new Set(measurementsForStep(state, step.id).map((m) => m.kind));
   return required.filter((kind) => !present.has(kind));
+}
+
+/**
+ * Dernière température relevée sur une étape, ou `undefined`. « Dernière » au
+ * sens de l'ordre d'arrivée : la machine ne trie pas sur `at`, un rejeu offline
+ * pouvant livrer les mesures dans le désordre (ADR-08).
+ */
+function latestTemperature(state: DayState, stepId: string): number | undefined {
+  let value: number | undefined;
+  for (const m of state.measurements) {
+    if (m.stepId === stepId && m.kind === "temperature") value = m.value;
+  }
+  return value;
+}
+
+/**
+ * L'étape n'a-t-elle **aucune barrière temporelle** (ni palier chronométré, ni
+ * stabilisation à confirmer) ? Une telle étape — filtration typiquement — ne
+ * progresse que sur action explicite de l'opérateur.
+ */
+function hasNoTimedGate(step: StepSpec): boolean {
+  return !step.requiresStabilization && step.plannedHoldMin === undefined;
+}
+
+/**
+ * Peut-on valider l'étape courante **en mode normal**, à l'instant `at` ?
+ *
+ * Règle **unique** : {@link transition} s'appuie sur cette même fonction pour
+ * `VALIDATE_STEP`. L'écran et la machine ne peuvent donc pas diverger — un
+ * bouton proposé est un bouton qui aboutit.
+ */
+export function stepValidationCheck(state: DayState, at: number): StepValidationCheck {
+  const step = currentStep(state);
+  if (step === null) {
+    return {
+      canValidate: false,
+      blockedBy: ["Brassin terminé : aucune étape courante."],
+      awaitsManualValidation: false,
+    };
+  }
+
+  const blockedBy: string[] = [];
+
+  if (state.status === "PENDING") {
+    blockedBy.push("Étape non démarrée.");
+  } else if (state.status === "AWAITING_STABILIZATION") {
+    blockedBy.push("Stabilisation à la température cible non confirmée.");
+  }
+
+  if (state.timer !== null && !isTimerElapsed(state.timer, at)) {
+    blockedBy.push("Timer de palier non écoulé.");
+  }
+
+  const missing = missingMeasurements(state, step);
+  if (missing.length > 0) {
+    blockedBy.push(`Mesures requises manquantes : ${missing.join(", ")}.`);
+  }
+
+  // Contrainte de température cible (M9-03) : n'est évaluée que si une mesure
+  // existe — l'absence de relevé est déjà signalée par `requiredMeasurements`,
+  // on ne veut pas deux messages pour un seul manque.
+  if (step.targetTempConstraint !== undefined && step.targetTempC !== undefined) {
+    const measured = latestTemperature(state, step.id);
+    if (measured !== undefined) {
+      const satisfied =
+        step.targetTempConstraint === "at_most"
+          ? measured <= step.targetTempC
+          : measured >= step.targetTempC;
+      if (!satisfied) {
+        const sens = step.targetTempConstraint === "at_most" ? "≤" : "≥";
+        blockedBy.push(
+          `Température de ${measured} °C hors cible (attendu ${sens} ${step.targetTempC} °C).`,
+        );
+      }
+    }
+  }
+
+  return {
+    canValidate: blockedBy.length === 0,
+    blockedBy,
+    awaitsManualValidation: hasNoTimedGate(step) && state.status === "AWAITING_VALIDATION",
+  };
 }
 
 /** Termine l'étape courante et avance le curseur (validation ou forçage). */
@@ -154,18 +237,12 @@ export function transition(state: DayState, event: DayEvent): TransitionResult {
     }
 
     case "VALIDATE_STEP": {
-      if (state.status === "PENDING" || state.status === "AWAITING_STABILIZATION") {
-        return reject(
-          state,
-          "Étape pas prête à valider (démarrer puis confirmer la stabilisation, ou forcer).",
-        );
-      }
-      if (state.timer !== null && !isTimerElapsed(state.timer, event.at)) {
-        return reject(state, "Timer de palier non écoulé.");
-      }
-      const missing = missingMeasurements(state, step);
-      if (missing.length > 0) {
-        return reject(state, `Mesures requises manquantes : ${missing.join(", ")}.`);
+      // Règle unique, partagée avec l'écran (M9-03) : ce que `stepValidationCheck`
+      // annonce validable l'est réellement ici. Un refus renvoie l'état
+      // **inchangé** — les mesures déjà saisies ne sont jamais perdues.
+      const check = stepValidationCheck(state, event.at);
+      if (!check.canValidate) {
+        return reject(state, check.blockedBy.join(" "));
       }
       return { state: completeCurrentStep(state, step) };
     }

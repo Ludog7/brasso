@@ -5,6 +5,7 @@ import {
   initDayState,
   isFinished,
   measurementsForStep,
+  stepValidationCheck,
   transition,
 } from "../../src/stateMachine/machine.js";
 import { defaultDayPlan } from "../../src/stateMachine/plan.js";
@@ -170,14 +171,16 @@ describe("VALIDATE_STEP — mode normal (conditions vérifiées)", () => {
   it("refuse si étape pas démarrée (PENDING)", () => {
     const plan: DayPlan = [{ id: "init", phase: "INITIALIZATION", requiresStabilization: false }];
     const res = transition(initDayState(plan), { type: "VALIDATE_STEP", at: 0 });
-    expect(res.rejection).toContain("pas prête");
+    // M9-03 : le motif est désormais **spécifique** à la cause (un seul message
+    // fourre-tout auparavant), pour que l'écran dise quoi faire.
+    expect(res.rejection).toContain("non démarrée");
   });
 
   it("refuse depuis AWAITING_STABILIZATION (stabilisation obligatoire d'abord)", () => {
     const plan: DayPlan = [{ id: "mash", phase: "MASH", requiresStabilization: true }];
     const s = transition(initDayState(plan), { type: "START_STEP", at: 0 }).state;
     const res = transition(s, { type: "VALIDATE_STEP", at: 0 });
-    expect(res.rejection).toContain("pas prête");
+    expect(res.rejection).toContain("Stabilisation");
   });
 
   it("refuse tant que le timer de palier n'est pas écoulé", () => {
@@ -349,5 +352,180 @@ describe("Parcours complet du plan par défaut (bout en bout)", () => {
     expect(isFinished(s)).toBe(true);
     expect(s.status).toBe("COMPLETED");
     expect(s.completedStepIds).toEqual(["init", "mash", "lauter", "boil", "cooling", "pitching"]);
+  });
+});
+
+describe("M9-03 — validation manuelle des étapes sans timer (bug « pas de next step »)", () => {
+  /** Filtration réelle : aucun timer, aucune stabilisation, deux mesures exigées. */
+  const lauterPlan: DayPlan = [
+    {
+      id: "lauter-1",
+      phase: "LAUTER",
+      requiresStabilization: false,
+      requiredMeasurements: ["density", "volume"],
+    },
+    { id: "pitching-1", phase: "PITCHING", requiresStabilization: false },
+  ];
+
+  it("signale une étape sans barrière temporelle comme attendant une validation", () => {
+    const started = transition(initDayState(lauterPlan), { type: "START_STEP", at: 0 }).state;
+    const check = stepValidationCheck(started, 0);
+    // C'est ce drapeau qui doit faire apparaître « Valider l'étape » à l'écran :
+    // sans lui, l'opérateur n'a plus que « Forcer l'étape » pour avancer.
+    expect(check.awaitsManualValidation).toBe(true);
+  });
+
+  it("avance SANS écart de procédure une fois les mesures saisies", () => {
+    let s = transition(initDayState(lauterPlan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "RECORD_MEASUREMENT", at: 1, kind: "density", value: 1.048 }).state;
+    s = transition(s, { type: "RECORD_MEASUREMENT", at: 2, kind: "volume", value: 30 }).state;
+
+    expect(stepValidationCheck(s, 3).canValidate).toBe(true);
+    const res = transition(s, { type: "VALIDATE_STEP", at: 3 });
+
+    expect(res.rejection).toBeUndefined();
+    // Le cœur du bug : avancer normalement ne doit produire AUCUN écart.
+    expect(res.deviation).toBeUndefined();
+    expect(currentStep(res.state)?.phase).toBe("PITCHING");
+  });
+
+  it("« Forcer l'étape » produit toujours un écart, lui (non-régression)", () => {
+    const s = transition(initDayState(lauterPlan), { type: "START_STEP", at: 0 }).state;
+    const res = transition(s, {
+      type: "FORCE_STEP",
+      at: 1,
+      author: "u1",
+      reason: "sonde HS",
+    });
+    expect(res.deviation).toMatchObject({ stepId: "lauter-1", reason: "sonde HS" });
+  });
+
+  it("bloque et explique tant qu'une mesure requise manque", () => {
+    const s = transition(initDayState(lauterPlan), { type: "START_STEP", at: 0 }).state;
+    const check = stepValidationCheck(s, 0);
+    expect(check.canValidate).toBe(false);
+    expect(check.blockedBy.join(" ")).toContain("density");
+    // L'écran et la machine ne divergent pas : le refus reprend le même motif.
+    expect(transition(s, { type: "VALIDATE_STEP", at: 0 }).rejection).toContain("density");
+  });
+
+  it("une étape non démarrée n'attend pas de validation manuelle", () => {
+    expect(stepValidationCheck(initDayState(lauterPlan), 0).awaitsManualValidation).toBe(false);
+  });
+
+  it("un brassin terminé ne propose plus rien", () => {
+    const done = initDayState([]);
+    const check = stepValidationCheck(done, 0);
+    expect(check).toMatchObject({ canValidate: false, awaitsManualValidation: false });
+    expect(check.blockedBy.join(" ")).toContain("terminé");
+  });
+
+  it("un palier chronométré n'est pas une validation manuelle", () => {
+    const plan: DayPlan = [
+      { id: "mash", phase: "MASH", requiresStabilization: true, plannedHoldMin: 60 },
+    ];
+    let s = transition(initDayState(plan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "CONFIRM_STABILIZATION", at: MIN }).state;
+    expect(stepValidationCheck(s, MIN).awaitsManualValidation).toBe(false);
+    expect(stepValidationCheck(s, MIN).blockedBy.join(" ")).toContain("Timer");
+  });
+});
+
+describe("M9-03 — sortie de refroidissement (bug « la validation n'enchaîne pas »)", () => {
+  const coolingPlan: DayPlan = [
+    {
+      id: "cooling-1",
+      phase: "COOLING",
+      requiresStabilization: true,
+      targetTempC: 20,
+      targetTempConstraint: "at_most",
+      requiredMeasurements: ["temperature"],
+    },
+    { id: "pitching-1", phase: "PITCHING", requiresStabilization: false },
+  ];
+
+  it("température à la cible : enchaîne sur l'ensemencement", () => {
+    let s = transition(initDayState(coolingPlan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "CONFIRM_STABILIZATION", at: MIN, temperatureC: 20 }).state;
+    const res = transition(s, { type: "VALIDATE_STEP", at: 2 * MIN });
+
+    expect(res.rejection).toBeUndefined();
+    expect(currentStep(res.state)?.phase).toBe("PITCHING");
+  });
+
+  it("sous la cible : enchaîne aussi (on a refroidi plus que demandé)", () => {
+    let s = transition(initDayState(coolingPlan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "CONFIRM_STABILIZATION", at: MIN, temperatureC: 18 }).state;
+    expect(currentStep(transition(s, { type: "VALIDATE_STEP", at: 2 * MIN }).state)?.phase).toBe(
+      "PITCHING",
+    );
+  });
+
+  it("au-dessus de la cible : refuse MAIS conserve la mesure saisie", () => {
+    let s = transition(initDayState(coolingPlan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "CONFIRM_STABILIZATION", at: MIN, temperatureC: 34 }).state;
+    const res = transition(s, { type: "VALIDATE_STEP", at: 2 * MIN });
+
+    expect(res.rejection).toContain("34");
+    expect(res.rejection).toContain("20");
+    expect(currentStep(res.state)?.phase).toBe("COOLING");
+    // Non négociable : un refus ne doit jamais faire perdre la saisie de
+    // l'opérateur — c'est ce qui permet de consigner températures et timing
+    // jusqu'à l'ensemencement.
+    expect(measurementsForStep(res.state, "cooling-1")).toHaveLength(1);
+    expect(measurementsForStep(res.state, "cooling-1")[0]?.value).toBe(34);
+  });
+
+  it("consigne plusieurs relevés successifs, et c'est le dernier qui décide", () => {
+    let s = transition(initDayState(coolingPlan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "CONFIRM_STABILIZATION", at: MIN, temperatureC: 40 }).state;
+    s = transition(s, {
+      type: "RECORD_MEASUREMENT",
+      at: 5 * MIN,
+      kind: "temperature",
+      value: 28,
+    }).state;
+    expect(stepValidationCheck(s, 5 * MIN).canValidate).toBe(false);
+
+    s = transition(s, {
+      type: "RECORD_MEASUREMENT",
+      at: 9 * MIN,
+      kind: "temperature",
+      value: 19,
+    }).state;
+    expect(stepValidationCheck(s, 9 * MIN).canValidate).toBe(true);
+    // Les trois relevés restent disponibles pour le journal du brassin.
+    expect(measurementsForStep(s, "cooling-1")).toHaveLength(3);
+  });
+
+  it("contrainte `at_least` : symétrique, pour une chauffe", () => {
+    const plan: DayPlan = [
+      {
+        id: "mash-1",
+        phase: "MASH",
+        requiresStabilization: false,
+        targetTempC: 66,
+        targetTempConstraint: "at_least",
+        requiredMeasurements: ["temperature"],
+      },
+    ];
+    let s = transition(initDayState(plan), { type: "START_STEP", at: 0 }).state;
+    s = transition(s, { type: "RECORD_MEASUREMENT", at: 1, kind: "temperature", value: 60 }).state;
+    expect(stepValidationCheck(s, 1).canValidate).toBe(false);
+    s = transition(s, { type: "RECORD_MEASUREMENT", at: 2, kind: "temperature", value: 67 }).state;
+    expect(stepValidationCheck(s, 2).canValidate).toBe(true);
+  });
+
+  it("sans température cible, la contrainte est ignorée", () => {
+    const plan: DayPlan = [
+      {
+        id: "x",
+        phase: "COOLING",
+        requiresStabilization: false,
+        targetTempConstraint: "at_most",
+      },
+    ];
+    const s = transition(initDayState(plan), { type: "START_STEP", at: 0 }).state;
+    expect(stepValidationCheck(s, 0).canValidate).toBe(true);
   });
 });

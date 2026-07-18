@@ -55,12 +55,16 @@ describe("buildDayPlan — dérivation recette → plan Jour J", () => {
       ]),
     });
 
-    // WHIRLPOOL / CONDITION / PACKAGE sont hors périmètre Jour J → non repris.
+    // M9-03 : WHIRLPOOL est désormais **repris** (il était droppé — c'était le
+    // bug : une étape décrite dans la recette disparaissait du Jour J).
+    // CONDITION / PACKAGE restent hors périmètre Jour J : ils relèvent du cycle
+    // post-ensemencement (jalons M9-05) et du conditionnement (M9-08).
     expect(plan.map((s) => s.phase)).toEqual<Phase[]>([
       "INITIALIZATION",
       "MASH",
       "LAUTER",
       "BOIL",
+      "WHIRLPOOL",
       "COOLING",
       "PITCHING",
     ]);
@@ -69,6 +73,7 @@ describe("buildDayPlan — dérivation recette → plan Jour J", () => {
       "mash-1",
       "lauter-1",
       "boil-1",
+      "whirlpool-1",
       "cooling-1",
       "pitching-1",
     ]);
@@ -327,5 +332,168 @@ describe("plan dérivé — consommable par la state machine (M1-13)", () => {
       "REFROIDISSEMENT",
       "ENSEMENCEMENT",
     ]);
+  });
+});
+
+describe("M9-03 — whirlpool réintégré au plan", () => {
+  it("mappe WHIRLPOOL avec des ids stables, entre ébullition et refroidissement", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotOf([
+        step("BOIL", { timeMin: 60 }),
+        step("WHIRLPOOL", { timeMin: 15, tempC: 80 }),
+        step("WHIRLPOOL", { timeMin: 10 }),
+        step("COOL", { targetTempC: 20 }),
+      ]),
+    });
+
+    const whirlpools = plan.filter((s) => s.phase === "WHIRLPOOL");
+    expect(whirlpools.map((s) => s.id)).toEqual(["whirlpool-1", "whirlpool-2"]);
+    expect(whirlpools[0]).toMatchObject({ plannedHoldMin: 15, targetTempC: 80 });
+    // Le whirlpool ne vise aucune consigne de chauffe : pas de stabilisation.
+    expect(whirlpools[0]?.requiresStabilization).toBe(false);
+    // Ordre : ébullition avant, refroidissement après.
+    const phases = plan.map((s) => s.phase);
+    expect(phases.indexOf("BOIL")).toBeLessThan(phases.indexOf("WHIRLPOOL"));
+    expect(phases.indexOf("WHIRLPOOL")).toBeLessThan(phases.indexOf("COOLING"));
+  });
+
+  it("sans whirlpool déclaré, aucune étape n'est inventée", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotOf([
+        step("BOIL", { timeMin: 60 }),
+        step("COOL", { targetTempC: 20 }),
+      ]),
+    });
+    expect(plan.some((s) => s.phase === "WHIRLPOOL")).toBe(false);
+  });
+
+  it("phaseToDayPhase mappe WHIRLPOOL vers la valeur Prisma", () => {
+    expect(phaseToDayPhase("WHIRLPOOL")).toBe<DayPhase>("WHIRLPOOL");
+  });
+
+  it("le refroidissement porte la contrainte de température descendante", () => {
+    const plan = buildDayPlan({ recipeSnapshot: snapshotOf([step("COOL", { targetTempC: 20 })]) });
+    expect(byId(plan)["cooling-1"]).toMatchObject({
+      targetTempC: 20,
+      targetTempConstraint: "at_most",
+    });
+  });
+});
+
+describe("M9-03 — assainissement du circuit de refroidissement (étape dérivée)", () => {
+  const brewWithCooling = (boilMin: number): unknown =>
+    snapshotOf([
+      step("MASH", { tempC: 66, timeMin: 60 }),
+      step("BOIL", { timeMin: boilMin }),
+      step("COOL", { targetTempC: 20 }),
+    ]);
+
+  it("scinde l'ébullition : l'assainissement occupe les dernières minutes", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: brewWithCooling(60),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    const steps = byId(plan);
+
+    // L'assainissement s'intercale entre l'ébullition et le refroidissement.
+    expect(plan.map((s) => s.id)).toEqual([
+      "init",
+      "mash-1",
+      "boil-1",
+      "boil-sanitize-1",
+      "cooling-1",
+    ]);
+    expect(steps["boil-1"]?.plannedHoldMin).toBe(55);
+    expect(steps["boil-sanitize-1"]?.plannedHoldMin).toBe(5);
+    // Le temps d'ébullition total est conservé : 55 + 5 = 60.
+    expect(
+      (steps["boil-1"]?.plannedHoldMin ?? 0) + (steps["boil-sanitize-1"]?.plannedHoldMin ?? 0),
+    ).toBe(60);
+    expect(steps["boil-sanitize-1"]?.phase).toBe("BOIL");
+  });
+
+  it("ébullition plus courte que le délai : l'assainissement couvre toute l'ébullition", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: brewWithCooling(3),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    const steps = byId(plan);
+    // Ni durée négative, ni étape omise.
+    expect(steps["boil-1"]?.plannedHoldMin).toBe(0);
+    expect(steps["boil-sanitize-1"]?.plannedHoldMin).toBe(3);
+  });
+
+  it("sans refroidissement, pas de circuit à assainir → aucune étape", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotOf([step("BOIL", { timeMin: 60 })]),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    expect(plan.some((s) => s.id === "boil-sanitize-1")).toBe(false);
+  });
+
+  it("sans durée d'ébullition connue → aucune étape", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotOf([step("BOIL", {}), step("COOL", { targetTempC: 20 })]),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    expect(plan.some((s) => s.id === "boil-sanitize-1")).toBe(false);
+  });
+
+  it("délai absent ou nul → aucune étape (core n'invente pas de valeur, ADR-01)", () => {
+    for (const lead of [undefined, 0, -5, Number.NaN]) {
+      const plan = buildDayPlan({
+        recipeSnapshot: brewWithCooling(60),
+        coolingCircuitSanitizeLeadMin: lead,
+      });
+      expect(plan.some((s) => s.id === "boil-sanitize-1")).toBe(false);
+      expect(byId(plan)["boil-1"]?.plannedHoldMin).toBe(60);
+    }
+  });
+
+  it("ADR-11 : le libellé parle d'assainissement, jamais de stérilisation", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: brewWithCooling(60),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    const texte = plan.map((s) => s.label ?? "").join(" ");
+    expect(texte).toMatch(/assainissement/i);
+    expect(texte).not.toMatch(/stéril/i);
+    expect(texte).not.toMatch(/conforme/i);
+    expect(texte).not.toMatch(/\bsûre?\b/i);
+  });
+});
+
+describe("M9-03 — rétro-compatibilité des snapshots antérieurs", () => {
+  it("un snapshot pré-M9 (sans whirlpool) produit toujours un plan valide", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotOf([
+        step("MASH", { tempC: 66, timeMin: 60 }),
+        step("SPARGE", { tempC: 76 }),
+        step("BOIL", { timeMin: 60 }),
+        step("COOL", { targetTempC: 20 }),
+        step("FERMENT", {}),
+      ]),
+    });
+    expect(plan.map((s) => s.phase)).toEqual<Phase[]>([
+      "INITIALIZATION",
+      "MASH",
+      "LAUTER",
+      "BOIL",
+      "COOLING",
+      "PITCHING",
+    ]);
+  });
+
+  it("params inexploitables : lecture défensive, aucune exception", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotOf([
+        step("WHIRLPOOL", { timeMin: "quinze", tempC: null }),
+        step("COOL", { targetTempC: 20 }),
+      ]),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    const wp = byId(plan)["whirlpool-1"];
+    expect(wp?.plannedHoldMin).toBeUndefined();
+    expect(wp?.targetTempC).toBeUndefined();
   });
 });

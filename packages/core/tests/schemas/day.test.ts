@@ -99,3 +99,38 @@ describe("dayPlanSchema / dayStateSchema — round-trip de l'instantané JSONB",
     expect(dayStateSchema.safeParse(bad).success).toBe(false);
   });
 });
+
+describe("M9-03 — le round-trip JSONB ne perd aucun champ du plan", () => {
+  it("conserve `targetTempConstraint` (sinon le refroidissement régresse au rechargement)", () => {
+    const step = {
+      id: "cooling-1",
+      phase: "COOLING" as const,
+      label: "Refroidissement",
+      requiresStabilization: true,
+      targetTempC: 20,
+      targetTempConstraint: "at_most" as const,
+      requiredMeasurements: ["temperature" as const],
+    };
+    const parsed = dayPlanSchema.parse(JSON.parse(JSON.stringify([step])));
+    // Zod retire par défaut les clés inconnues : un champ oublié ici
+    // disparaîtrait en silence à la première reprise de session.
+    expect(parsed[0]).toEqual(step);
+  });
+
+  it("accepte la phase WHIRLPOOL (M9-03)", () => {
+    const plan = [{ id: "whirlpool-1", phase: "WHIRLPOOL", requiresStabilization: false }];
+    expect(dayPlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it("rejette une valeur de contrainte inconnue", () => {
+    const plan = [
+      {
+        id: "x",
+        phase: "COOLING",
+        requiresStabilization: false,
+        targetTempConstraint: "exactly",
+      },
+    ];
+    expect(dayPlanSchema.safeParse(plan).success).toBe(false);
+  });
+});
