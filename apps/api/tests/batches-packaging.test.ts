@@ -12,6 +12,8 @@ import type {
   SessionRecord,
 } from "../src/modules/auth/repository.js";
 import type {
+  CarbonationReadingData,
+  ConditioningSettings,
   PackagingCorrectionData,
   PackagingLineView,
   PackagingMovementView,
@@ -142,8 +144,38 @@ class InMemoryPackagingRepository implements PackagingRepository {
   /** Force un échec au milieu de la séquence (test de transactionnalité). */
   failOnLineIndex: number | null = null;
 
+  /** Paramètres de mise en condition (M9-15), surchargeables par test. */
+  settings: ConditioningSettings = {
+    timezone: "Europe/Paris",
+    refermentationDays: 21,
+    forcedCarbonationDays: 7,
+    carbonationToleranceBar: 0.2,
+  };
+
+  conditioningSettings(): Promise<ConditioningSettings> {
+    return Promise.resolve(this.settings);
+  }
+
   listPackaging(batchId: string): Promise<PackagingLineView[]> {
     return Promise.resolve([...(this.lines.get(batchId) ?? [])]);
+  }
+
+  findLine(batchId: string, lineId: string): Promise<PackagingLineView | null> {
+    const found = (this.lines.get(batchId) ?? []).find((l) => l.id === lineId);
+    return Promise.resolve(found ?? null);
+  }
+
+  recordCarbonationReading(
+    batchId: string,
+    lineId: string,
+    data: CarbonationReadingData,
+  ): Promise<PackagingLineView> {
+    const lines = this.lines.get(batchId) ?? [];
+    const updated = lines.map((l) => (l.id === lineId ? { ...l, ...data } : l));
+    this.lines.set(batchId, updated);
+    const line = updated.find((l) => l.id === lineId);
+    if (!line) throw new Error(`ligne ${lineId} absente`);
+    return Promise.resolve(line);
   }
 
   findProductItem(batchId: string): Promise<{ id: string; name: string } | null> {
@@ -194,6 +226,12 @@ class InMemoryPackagingRepository implements PackagingRepository {
         containerItemId: line.containerItemId,
         containerVolumeL: line.containerVolumeL,
         quantity: line.quantity,
+        conditioningMethod: line.conditioningMethod,
+        co2TargetVolumes: line.co2TargetVolumes,
+        measuredPressureBar: null,
+        measuredTempC: null,
+        carbonationValidatedAt: null,
+        availableForSaleAt: line.availableForSaleAt,
         packagedAt: new Date("2026-04-10T10:00:00Z"),
         note: data.note,
       });
@@ -531,9 +569,9 @@ describe("POST /api/batches/:id/packaging/corrections — correction append-only
   });
 });
 
-describe("POST /api/batches/:id/packaging:split — aide à la saisie (FORMULES §13.3)", () => {
+describe("POST /api/batches/:id/packaging/split — aide à la saisie (FORMULES §13.3)", () => {
   it("propose la répartition de référence sans rien écrire", async () => {
-    const res = await inject("POST", "/api/batches/batch_1/packaging:split", {
+    const res = await inject("POST", "/api/batches/batch_1/packaging/split", {
       cookie: cookieFor("brasseur"),
       payload: {
         volumeL: 24,
@@ -588,6 +626,186 @@ describe("le produit fini s'insère dans le pipeline M7 existant (choix Q10)", (
     expect(second).not.toBe(first);
     expect(packaging.catalog.get(first)?.sourceBatchId).toBe("batch_1");
     expect(packaging.catalog.get(second)?.sourceBatchId).toBe("batch_2");
+  });
+});
+
+describe("mise en condition avant vente (M9-15)", () => {
+  /** Ligne de bouteilles en refermentation — la case cochée à l'écran. */
+  const BOTTLES_REFERMENTED = {
+    containerItemId: "cat-bouteille",
+    containerVolumeL: 0.75,
+    quantity: 20,
+    conditioningMethod: "REFERMENTATION",
+  };
+  /** Ligne de fûts en carbonatation forcée, 2,4 volumes de CO₂ visés. */
+  const KEGS_FORCED = {
+    containerItemId: "cat-fut",
+    containerVolumeL: 20,
+    quantity: 2,
+    conditioningMethod: "FORCED_CARBONATION",
+    co2TargetVolumes: 2.4,
+  };
+
+  const lineOf = async (kind: string): Promise<PackagingLineView> => {
+    const lines = await packaging.listPackaging("batch_1");
+    const found = lines.find((l) => l.conditioningMethod === kind);
+    if (!found) throw new Error(`aucune ligne ${kind}`);
+    return found;
+  };
+
+  const readPressure = (lineId: string, payload: unknown, user = "brasseur") =>
+    inject("POST", `/api/batches/batch_1/packaging/${lineId}/carbonation`, {
+      cookie: cookieFor(user),
+      payload,
+    });
+
+  it("refermentation en bouteille : mise en vente estimée à +21 jours", async () => {
+    await record({ lines: [BOTTLES_REFERMENTED] });
+    const line = await lineOf("REFERMENTATION");
+
+    // Le délai court dès la mise en bouteille : la levure travaille tout de suite.
+    expect(line.availableForSaleAt).not.toBeNull();
+    const days = (line.availableForSaleAt!.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(days).toBeGreaterThan(20);
+    expect(days).toBeLessThan(22);
+  });
+
+  it("sans mise en condition déclarée, aucune date de mise en vente", async () => {
+    // Une bière plate n'est pas vendable : on ne date pas ce qui n'a pas été
+    // mis en condition.
+    await record({ lines: [{ containerVolumeL: 0.75, quantity: 4 }] });
+    const line = (await packaging.listPackaging("batch_1"))[0];
+    expect(line?.conditioningMethod).toBe("NONE");
+    expect(line?.availableForSaleAt).toBeNull();
+  });
+
+  it("carbonatation forcée : aucune date tant que la pression n'est pas relevée", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+    // Dater depuis la mise en fût promettrait une bière prête alors que le fût
+    // peut être resté plat.
+    expect(line.availableForSaleAt).toBeNull();
+  });
+
+  it("un relevé atteignant la cible fixe la mise en vente à +7 jours", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+
+    // Pression correcte pour 2,4 volumes à 4 °C (~0,744 bar, FORMULES §8.2).
+    const target = await inject("POST", "/api/batches/batch_1/packaging/pressure", {
+      cookie: cookieFor("brasseur"),
+      payload: { co2TargetVolumes: 2.4, tempC: 4 },
+    });
+    const targetBar = target.json().target.targetBar;
+    expect(targetBar).toBeGreaterThan(0.7);
+    expect(targetBar).toBeLessThan(0.8);
+
+    const res = await readPressure(line.id, { pressureBar: targetBar, tempC: 4 });
+    expect(res.statusCode).toBe(201);
+    const reading = res.json().reading;
+    expect(reading.onTarget).toBe(true);
+    expect(reading.pendingReason).toBeNull();
+
+    const days =
+      (new Date(reading.line.availableForSaleAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(days).toBeGreaterThan(6);
+    expect(days).toBeLessThan(8);
+  });
+
+  it("la cible est jugée à la température RELEVÉE, pas à celle espérée", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+
+    // 0,744 bar conviendrait à 4 °C ; à 12 °C il en faut ~1,25 — la bière est
+    // donc sous-carbonatée, et le relevé ne doit pas la déclarer prête.
+    const res = await readPressure(line.id, { pressureBar: 0.744, tempC: 12 });
+    const reading = res.json().reading;
+
+    expect(reading.onTarget).toBe(false);
+    expect(reading.deltaBar).toBeLessThan(0);
+    expect(reading.line.availableForSaleAt).toBeNull();
+    expect(reading.pendingReason).toMatch(/relevé de pression/i);
+  });
+
+  it("un relevé hors cible est conservé : c'est un constat, pas un échec effacé", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+    await readPressure(line.id, { pressureBar: 0.3, tempC: 4 });
+
+    const after = await lineOf("FORCED_CARBONATION");
+    expect(after.measuredPressureBar).toBe(0.3);
+    expect(after.measuredTempC).toBe(4);
+    expect(after.carbonationValidatedAt).toBeNull();
+  });
+
+  it("l'opérateur réajuste puis relève à nouveau, et la date se fixe alors", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+
+    await readPressure(line.id, { pressureBar: 0.3, tempC: 4 }); // trop bas
+    expect((await lineOf("FORCED_CARBONATION")).availableForSaleAt).toBeNull();
+
+    const ok = await readPressure(line.id, { pressureBar: 0.744, tempC: 4 });
+    expect(ok.json().reading.onTarget).toBe(true);
+    expect((await lineOf("FORCED_CARBONATION")).availableForSaleAt).not.toBeNull();
+  });
+
+  it("fûts et bouteilles du même brassin ont deux dates distinctes", async () => {
+    await record({ lines: [BOTTLES_REFERMENTED, KEGS_FORCED] });
+
+    const bottles = await lineOf("REFERMENTATION");
+    const kegs = await lineOf("FORCED_CARBONATION");
+    // Les bouteilles sont datées tout de suite, les fûts attendent le relevé :
+    // les deux ne sont pas prêts en même temps, d'où la méthode par contenant.
+    expect(bottles.availableForSaleAt).not.toBeNull();
+    expect(kegs.availableForSaleAt).toBeNull();
+
+    await readPressure(kegs.id, { pressureBar: 0.744, tempC: 4 });
+    const kegsAfter = await lineOf("FORCED_CARBONATION");
+    expect(kegsAfter.availableForSaleAt).not.toBeNull();
+    // Fûts prêts avant les bouteilles : 7 jours contre 21.
+    expect(kegsAfter.availableForSaleAt!.getTime()).toBeLessThan(
+      bottles.availableForSaleAt!.getTime(),
+    );
+  });
+
+  it("expose la date calendaire à côté de l'instant", async () => {
+    await record({ lines: [BOTTLES_REFERMENTED] });
+    const res = await inject("GET", "/api/batches/batch_1/packaging", {
+      cookie: cookieFor("brasseur"),
+    });
+    const line = res.json().packaging[0];
+    // Même piège qu'en M9-07 : tronquer l'instant ISO annoncerait la bière
+    // vendable un jour trop tôt.
+    expect(line.availableForSaleDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("les délais viennent des Settings, pas de constantes", async () => {
+    packaging.settings = { ...packaging.settings, refermentationDays: 30 };
+    await record({ lines: [BOTTLES_REFERMENTED] });
+    const line = await lineOf("REFERMENTATION");
+    const days = (line.availableForSaleAt!.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(days).toBeGreaterThan(29);
+  });
+
+  it("relever une pression sur des bouteilles est refusé (409)", async () => {
+    await record({ lines: [BOTTLES_REFERMENTED] });
+    const line = await lineOf("REFERMENTATION");
+    const res = await readPressure(line.id, { pressureBar: 0.744, tempC: 4 });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error?.code ?? res.json().code).toBe("NOT_FORCED_CARBONATION");
+  });
+
+  it("ligne inexistante → 404", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    expect((await readPressure("inconnue", { pressureBar: 0.7, tempC: 4 })).statusCode).toBe(404);
+  });
+
+  it("caisse ne relève pas de pression (écriture de stock)", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+    const res = await readPressure(line.id, { pressureBar: 0.744, tempC: 4 }, "caisse");
+    expect(res.statusCode).toBe(403);
   });
 });
 

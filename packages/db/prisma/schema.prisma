@@ -134,6 +134,20 @@ enum BatchMilestoneKind {
   GARDE
 }
 
+/// Mise en condition d'une ligne de conditionnement avant mise en vente (M9-15).
+/// Une bière tout juste conditionnée est plate : il lui faut ses bulles.
+/// - `REFERMENTATION` — bouteille : la levure résiduelle consomme le sucre de
+///   priming et carbonate en bouteille (FORMULES §8.1). Compter ~3 semaines.
+/// - `FORCED_CARBONATION` — fût : le CO₂ est poussé au détendeur, sans
+///   refermentation (§8.2). Prête ~1 semaine après un relevé de pression
+///   conforme à la cible.
+/// - `NONE` — aucune mise en condition déclarée.
+enum ConditioningMethod {
+  NONE
+  REFERMENTATION
+  FORCED_CARBONATION
+}
+
 /// Type de correction densité/volume pré-ébullition proposée puis journalisée
 /// (M4-02/M4-07). Valeurs indicatives d'aide à la décision (ADR-11).
 enum CorrectionType {
@@ -277,6 +291,22 @@ model Settings {
   defaultDryHopDays       Int @default(3)
   defaultColdCrashDays    Int @default(2)
   defaultConditioningDays Int @default(21)
+
+  /// Délais de **mise en condition** avant mise en vente, en **jours** entiers
+  /// (M9-15). Une bière tout juste conditionnée n'est pas buvable : il lui
+  /// manque ses bulles.
+  /// - refermentation en bouteille : la levure carbonate sur ~3 semaines ;
+  /// - carbonatation forcée en fût : ~1 semaine après un relevé de pression
+  ///   conforme à la cible.
+  /// ADR-01 : paramètres métier, jamais des constantes de `core`.
+  refermentationDays    Int @default(21)
+  forcedCarbonationDays Int @default(7)
+
+  /// Tolérance admise (bar) entre la pression relevée au fût et la pression
+  /// cible recalculée à la température relevée (M9-15, FORMULES §8.2).
+  /// Stockée en **millibar** entier : la règle « pas de flottant pour un
+  /// paramètre de réglage » évite qu'un 0,2 devienne 0,19999999999999998.
+  carbonationToleranceMbar Int @default(200)
 
   /// Délai, en **minutes** avant le hors-flamme, auquel se déclenche l'étape
   /// d'assainissement du circuit de refroidissement (M9-03). Paramètre et non
@@ -662,6 +692,26 @@ model BatchPackaging {
   containerVolumeL Float
   /// Nombre de contenants produits (entier — on ne conditionne pas 2,5 bouteilles).
   quantity         Int
+
+  /// Mise en condition de **cette ligne** (M9-15). Elle est par contenant et non
+  /// par brassin : un même brassin part souvent moitié en fûts, moitié en
+  /// bouteilles, et les deux ne sont pas prêts à la vente en même temps.
+  conditioningMethod ConditioningMethod @default(NONE)
+
+  /// Carbonatation forcée (fût) : CO₂ visé en **volumes** (FORMULES §8.3), puis
+  /// relevé de l'opérateur — pression en **bar** (unité interne) et température
+  /// en °C. La conformité se juge contre la cible recalculée à la température
+  /// **relevée**, pas à celle prévue.
+  co2TargetVolumes    Float?
+  measuredPressureBar Float?
+  measuredTempC       Float?
+  /// Instant du relevé jugé conforme ; nul tant qu'aucun relevé ne l'est.
+  carbonationValidatedAt DateTime?
+
+  /// Date **estimée** de mise en vente (ADR-11 : indicateur d'aide à la
+  /// décision, jamais une garantie). Nulle tant que la mise en condition n'est
+  /// pas engagée — une bière sans bulles n'est pas vendable.
+  availableForSaleAt DateTime?
 
   packagedAt   DateTime @default(now())
   packagedById String?

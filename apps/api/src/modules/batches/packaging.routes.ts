@@ -19,7 +19,13 @@ import { type PackagingRepository, PrismaPackagingRepository } from "./packaging
 import { BatchPackagingService } from "./packaging.service.js";
 import type { BatchRepository } from "./repository.js";
 import { PrismaBatchRepository } from "./repository.js";
-import { packagingCorrectionBody, packagingRecordBody, packagingSplitQuery } from "./schema.js";
+import {
+  carbonationReadingBody,
+  carbonationTargetQuery,
+  packagingCorrectionBody,
+  packagingRecordBody,
+  packagingSplitQuery,
+} from "./schema.js";
 import { BatchService } from "./service.js";
 
 export interface BatchPackagingRoutesOptions {
@@ -32,6 +38,7 @@ export interface BatchPackagingRoutesOptions {
 }
 
 const idParams = z.object({ id: z.string().min(1) });
+const lineParams = z.object({ id: z.string().min(1), lineId: z.string().min(1) });
 
 export const batchPackagingRoutes: FastifyPluginAsync<BatchPackagingRoutesOptions> = async (
   app,
@@ -75,14 +82,43 @@ export const batchPackagingRoutes: FastifyPluginAsync<BatchPackagingRoutesOption
     },
   );
 
-  // Aide à la saisie : propose une répartition, n'écrit rien — d'où `read`.
+  // Aides à la saisie : elles proposent des chiffres et n'écrivent rien — d'où
+  // `read`. Sous-chemins **statiques** et non un suffixe `:verbe` : dans le
+  // routeur de Fastify, un `:` ouvre un paramètre, si bien que
+  // `packaging:split` déclare en réalité « packaging » suivi d'un paramètre —
+  // deux suffixes de ce genre entrent alors en collision.
   app.post(
-    "/batches/:id/packaging:split",
+    "/batches/:id/packaging/split",
     { config: app.rbac("stocks", "read") },
     async (request) => {
       idParams.parse(request.params);
       const query = packagingSplitQuery.parse(request.body);
       return { split: service.proposeSplit(query) };
+    },
+  );
+
+  // Mise en condition (M9-15) — aide au réglage du détendeur : pression à
+  // appliquer pour le CO₂ visé à la température de la bière.
+  app.post(
+    "/batches/:id/packaging/pressure",
+    { config: app.rbac("stocks", "read") },
+    async (request) => {
+      idParams.parse(request.params);
+      const query = carbonationTargetQuery.parse(request.body);
+      return { target: await service.targetPressure(query) };
+    },
+  );
+
+  // Relevé de pression au fût : la mesure est enregistrée même si elle n'atteint
+  // pas la cible — c'est un constat qui permet de réajuster, pas un échec.
+  app.post(
+    "/batches/:id/packaging/:lineId/carbonation",
+    { config: app.rbac("stocks", "create") },
+    async (request, reply) => {
+      const { id, lineId } = lineParams.parse(request.params);
+      const body = carbonationReadingBody.parse(request.body);
+      const reading = await service.recordCarbonationReading(id, lineId, body);
+      return reply.code(201).send({ reading });
     },
   );
 };
