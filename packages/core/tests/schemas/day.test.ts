@@ -122,6 +122,56 @@ describe("M9-03 — le round-trip JSONB ne perd aucun champ du plan", () => {
     expect(dayPlanSchema.safeParse(plan).success).toBe(true);
   });
 
+  it("conserve `hopAdditions` (M9-04 — sinon les alertes de houblonnage régressent au rechargement)", () => {
+    const step = {
+      id: "boil-1",
+      phase: "BOIL" as const,
+      requiresStabilization: true,
+      plannedHoldMin: 60,
+      hopAdditions: [
+        {
+          name: "Magnum",
+          amountG: 20,
+          nature: "BITTERING" as const,
+          remainingMin: 60,
+          offsetFromStartMin: 0,
+          inconsistent: false,
+        },
+        {
+          name: "Citra",
+          amountG: 30,
+          nature: "FLAME_OUT" as const,
+          remainingMin: 0,
+          offsetFromStartMin: 60,
+          inconsistent: false,
+        },
+      ],
+    };
+    const parsed = dayPlanSchema.parse(JSON.parse(JSON.stringify([step])));
+    expect(parsed[0]).toEqual(step);
+  });
+
+  it("rejette une nature d'ajout de houblon inconnue", () => {
+    const plan = [
+      {
+        id: "boil-1",
+        phase: "BOIL",
+        requiresStabilization: true,
+        hopAdditions: [
+          {
+            name: "Magnum",
+            amountG: 20,
+            nature: "DRY_HOP",
+            remainingMin: 60,
+            offsetFromStartMin: 0,
+            inconsistent: false,
+          },
+        ],
+      },
+    ];
+    expect(dayPlanSchema.safeParse(plan).success).toBe(false);
+  });
+
   it("rejette une valeur de contrainte inconnue", () => {
     const plan = [
       {
