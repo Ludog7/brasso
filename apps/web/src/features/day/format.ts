@@ -20,6 +20,17 @@ export function formatMinutes(minutes: number | null): string {
   return `${Math.round(minutes * 10) / 10} min`;
 }
 
+/**
+ * Heure d'un instant (epoch ms) en `HH:MM`, ou `—` si invalide. Le Jour J tient
+ * dans une journée : l'heure seule suffit à horodater une mesure à l'écran, et
+ * se lit d'un coup d'œil sur une tablette posée à distance.
+ */
+export function formatClock(at: number): string {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
 /** Date/heure d'un ISO 8601 en format court FR (`14/07/2026 10:32`), ou `—` si invalide. */
 export function formatDateTime(iso: string): string {
   const date = new Date(iso);

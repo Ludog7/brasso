@@ -3,7 +3,7 @@
  * `DayPhase`) sont déjà en français ; on les rend simplement lisibles à l'écran.
  */
 
-import type { DayPhase, MeasurementKind, Phase } from "@brasso/core";
+import type { DayPhase, HopAdditionNature, MeasurementKind, Phase } from "@brasso/core";
 
 /** Libellé lisible d'une phase Jour J. */
 export const DAY_PHASE_LABELS: Record<DayPhase, string> = {
@@ -38,4 +38,23 @@ export const MEASUREMENT_LABELS: Record<MeasurementKind, string> = {
   volume: "Volume",
   temperature: "Température",
   ph: "pH",
+};
+
+/**
+ * Libellé lisible de la nature d'un ajout de houblon (M9-11). Le **hors-flamme**
+ * porte un libellé qui lui est propre : c'est le seul ajout qui s'accompagne
+ * d'un geste sur le feu, et le confondre avec le dernier aromatique change le
+ * profil de la bière.
+ */
+export const HOP_NATURE_LABELS: Record<HopAdditionNature, string> = {
+  BITTERING: "Amérisant",
+  AROMA: "Aromatique",
+  FLAME_OUT: "Hors-flamme",
+};
+
+/** Consigne du geste à faire, par nature d'ajout — lue à distance, sur tablette. */
+export const HOP_NATURE_ACTIONS: Record<HopAdditionNature, string> = {
+  BITTERING: "Ajoute le houblon amérisant.",
+  AROMA: "Ajoute le houblon aromatique.",
+  FLAME_OUT: "Coupe le feu, puis ajoute le houblon hors-flamme.",
 };

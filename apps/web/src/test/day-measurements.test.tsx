@@ -175,7 +175,7 @@ describe("saisie de mesures & alertes d'écart Jour J (M4-11)", () => {
     expect(posted?.body).toEqual({ type: "RECORD_MEASUREMENT", kind: "density", value: 1.03 });
   });
 
-  it("mesures requises manquantes → « Valider » non proposé, mesures rappelées", async () => {
+  it("mesures requises manquantes → « Valider » présent mais inactif, motif affiché", async () => {
     scenario = {
       day: lauterSession([]),
       onEvent: () => json(200, { day: scenario.day }),
@@ -185,8 +185,10 @@ describe("saisie de mesures & alertes d'écart Jour J (M4-11)", () => {
 
     // Le rappel des mesures requises manquantes est affiché…
     expect(await screen.findByText(/mesures requises manquantes/i)).toBeInTheDocument();
-    // …et la validation normale n'est pas proposée tant qu'elles manquent.
-    expect(screen.queryByRole("button", { name: /valider l'étape/i })).not.toBeInTheDocument();
+    // …et la validation nominale reste **visible**, désactivée (M9-11 §A) : masquer
+    // le bouton laissait l'opérateur sans chemin visible, d'où le recours abusif à
+    // « Forcer l'étape » constaté au premier test réel.
+    expect(screen.getByRole("button", { name: /valider l'étape/i })).toBeDisabled();
   });
 
   it("une mesure hors modèle affiche une alerte d'écart", async () => {
