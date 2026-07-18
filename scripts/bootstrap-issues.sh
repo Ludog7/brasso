@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # bootstrap-issues.sh — amorçage de l'orchestration GitHub de Brasso.
-# Crée (idempotent) : labels, milestones M0→M8, issues depuis docs/issues/**,
+# Crée (idempotent) : labels, milestones M0→M14, issues depuis docs/issues/**,
 # résout les dépendances {{Mx-yy}} en numéros réels, crée les epics chapeau.
 #
 # Prérequis : gh authentifié (gh auth status). Compatible Git Bash (Windows).
@@ -79,7 +79,7 @@ create_label P2 "fef2c0" "Priorite : basse"
 create_label blocked "e11d21" "Statut : bloque (voir issue liee en commentaire)"
 
 # ---------------------------------------------------------------------------
-# 2) Milestones M0→M8 (SPEC-ORCHESTRATION §4)
+# 2) Milestones M0→M14 (SPEC-ORCHESTRATION §4)
 # ---------------------------------------------------------------------------
 find_milestone() { # title -> number|empty
   gh api "repos/$REPO/milestones?state=all&per_page=100" \
@@ -102,16 +102,23 @@ create_milestone "M5 — Stocks complets" "Logique RECETTE (reservation->deducti
 create_milestone "M6 — Membres & RGPD" "CRUD membres, consentements historises, webhook HelloAsso, AuditLog, export/rectification/anonymisation. Demo : cycle adhesion -> cotisation HelloAsso -> statut a jour."
 create_milestone "M7 — Hub caisse & affichage" "Webhooks SumUp/Zettle, mapping SKU, mode degrade + dashboard anomalies, exports CSV compta, module ecrans. Demo : vente SumUp -> stock decremente ; vente non mappee -> alerte ; ecran bar a jour."
 create_milestone "M8 — Durcissement & mise en prod" "E2E Playwright (parcours critiques), backups pg_dump + restauration testee, runbooks, perf tablette, REG-01/REG-02, calculateurs autonomes. Demo : installation from scratch + restauration backup reussie."
+# Dev step 2 (post-go-live) — SPEC-ORCHESTRATION §9
+create_milestone "M9 — Boucle brassin complète" "Cycle du brassin au-dela du Jour J : corrections state machine, whirlpool, assainissement du circuit, alertes houblonnage, volumes, jalons dates, conditionnement -> stock produits finis. Demo : d'une recette publiee jusqu'au stock, brassin conditionne et produit fini vendable."
+create_milestone "M10 — Socle transverse : options, apparence & identité" "Options generales, theme derive d'une couleur de marque, logo/nom au bandeau, bascule d'utilisateur par PIN, fondations design system. Demo : identite appliquee partout ; bascule d'utilisateur en 2 clics + PIN."
+create_milestone "M11 — Atelier & catalogue" "Equipement (categories, gaz/electrique, mode expert), recettes (reactivite, levure seche, BJCP), carbonatation soda keg, stock (familles, recherche), cartes du bar. Demo : prevision temps reel, levure seche calculee, carte du bar peuplee des boissons finies."
+create_milestone "M12 — Vie associative" "Membres (n auto, majeur/mineur, age, adresse detaillee, photo), statut 4 couleurs, echeance 12 mois, lien Cotisations<->Membres, double opt-in email. Demo : adhesion -> email valide -> statut vert, puis orange a l'approche de l'echeance."
+create_milestone "M13 — Pilotage" "Volet Taches, agenda interne offline-first (+ export .ics), tableau de bord permanent a 6 tuiles. Demo : ecran d'accueil affichant en permanence les 6 tuiles alimentees."
+create_milestone "M14 — Appliance LAN-only" "Socle Proxmox + VM Debian, auto-demarrage, sauvegardes 2 niveaux, TLS en LAN, mise a jour avec snapshot prealable. Demo : installation reproductible, rollback par snapshot, restauration testee."
 
 # ---------------------------------------------------------------------------
-# 3) Issues filles depuis docs/issues/M0 → M8
+# 3) Issues filles depuis docs/issues/M0 → M14
 # ---------------------------------------------------------------------------
 find_issue() { # $1 = id ("M0-01") ou titre exact -> number|empty
   gh issue list --repo "$REPO" --state all --limit 300 --json number,title \
     --jq "map(select(.title==\"$1\" or (.title | startswith(\"$1 \")))) | .[0].number // empty" 2>/dev/null || true
 }
 log "Issues filles…"
-for ms in M0 M1 M2 M3 M4 M5 M6 M7 M8; do
+for ms in M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14; do
   for f in "$ISSUES_DIR/$ms"/*.md; do
     [ -e "$f" ] || continue
     id="$(get_id "$f")"; title="$(get_title "$f")"
@@ -143,7 +150,7 @@ build_sedscript() {
 }
 log "Résolution des dépendances…"
 SEDSCRIPT="$(build_sedscript)"
-for ms in M0 M1 M2 M3 M4 M5 M6 M7 M8; do
+for ms in M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14; do
   for f in "$ISSUES_DIR/$ms"/*.md; do
     [ -e "$f" ] || continue
     grep -q '{{M' "$f" || continue
@@ -161,7 +168,7 @@ done
 # ---------------------------------------------------------------------------
 # 5) Epics chapeau
 # ---------------------------------------------------------------------------
-checklist_for() { # $1 = M0…M8
+checklist_for() { # $1 = M0…M14
   for f in "$ISSUES_DIR/$1"/*.md; do
     [ -e "$f" ] || continue
     local id title num
@@ -175,7 +182,7 @@ checklist_for() { # $1 = M0…M8
   done
 }
 log "Epics…"
-for ms in M0 M1 M2 M3 M4 M5 M6 M7 M8; do
+for ms in M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14; do
   ef="$ISSUES_DIR/epics/$ms-epic.md"
   [ -e "$ef" ] || continue
   etitle="$(get_title "$ef")"; emilestone="$(fm_field "$ef" milestone)"
