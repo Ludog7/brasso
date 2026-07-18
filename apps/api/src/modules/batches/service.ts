@@ -71,7 +71,10 @@ const LINEAR_FLOW: readonly BatchStatus[] = [
 /**
  * Une transition est légale si elle avance d'exactement un cran dans le flux
  * linéaire, ou passe à `ANNULE` depuis n'importe quel statut sauf terminal
- * (`TERMINE`/`ANNULE`). Tout le reste (saut, retour arrière, no-op) est refusé.
+ * (`TERMINE`/`ANNULE`). Tout le reste (saut, retour arrière) est refusé.
+ *
+ * Le cas « statut déjà atteint » ne passe pas par ici : il est traité en amont
+ * comme un **no-op idempotent** (voir {@link BatchService.changeStatus}).
  */
 function isTransitionAllowed(from: BatchStatus, to: BatchStatus): boolean {
   if (to === "ANNULE") {
@@ -87,6 +90,17 @@ export interface StockWarning {
   name: string;
   requested: number;
   available: number;
+}
+
+/**
+ * Résultat d'une transition de statut. `changed: false` signale un **rejeu** :
+ * le batch portait déjà le statut demandé, rien n'a été réappliqué. L'appelant
+ * (file offline, M9-11) peut ainsi distinguer « c'était déjà fait » de « je
+ * viens de le faire », sans avoir à traiter une erreur.
+ */
+export interface BatchStatusChangeResult {
+  batch: BatchDetailView;
+  changed: boolean;
 }
 
 /** Résultat de planification : le batch + le bilan de réservation. */
@@ -185,20 +199,33 @@ export class BatchService {
    * Fait progresser le statut d'un batch (progression administrative M3-06, hors
    * Jour J). Transition illégale → 409 `INVALID_TRANSITION`. Passer à `ANNULE`
    * libère les réservations (même effet que `cancel`).
+   *
+   * **Rejeu idempotent (M9-07)** : demander le statut que le batch porte déjà
+   * n'est pas une erreur, c'est un constat — l'intention est déjà satisfaite. Le
+   * batch est renvoyé inchangé, `changed: false`, et **aucun effet de bord n'est
+   * rejoué** : les réservations ne sont pas reconsommées, les jalons de date pas
+   * réécrits. C'est ce qui rend la file offline du Jour J (ADR-08, M4-14) sûre à
+   * rejouer sans faire remonter une fausse erreur au brasseur, qui n'a rien fait
+   * de mal. Les transitions réellement fautives — sauter le conditionnement,
+   * revenir en arrière, faire repartir un brassin annulé — restent refusées.
    */
   async changeStatus(
     id: string,
     target: BatchStatus,
     actorId: string | null = null,
-  ): Promise<BatchDetailView> {
+  ): Promise<BatchStatusChangeResult> {
     const batch = await this.get(id);
+    if (batch.status === target) {
+      return { batch, changed: false };
+    }
     if (!isTransitionAllowed(batch.status, target)) {
       throw new InvalidTransitionError(id, batch.status, target);
     }
-    if (target === "ANNULE") {
-      return this.repo.cancel(id);
-    }
-    return this.repo.transition(id, target, actorId);
+    const updated =
+      target === "ANNULE"
+        ? await this.repo.cancel(id)
+        : await this.repo.transition(id, target, actorId);
+    return { batch: updated, changed: true };
   }
 
   /** Enregistre une mesure append-only sur un batch existant (404 sinon). */
