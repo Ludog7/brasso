@@ -16,6 +16,8 @@ import { auditRoutes } from "./modules/audit/routes.js";
 import { AuditService } from "./modules/audit/service.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { authRoutes } from "./modules/auth/routes.js";
+import type { BatchCycleRepository } from "./modules/batches/cycle.repository.js";
+import { batchCycleRoutes } from "./modules/batches/cycle.routes.js";
 import type { DayRepository } from "./modules/batches/day.repository.js";
 import { batchDayRoutes } from "./modules/batches/day.routes.js";
 import type { BatchRepository } from "./modules/batches/repository.js";
@@ -66,6 +68,8 @@ export interface BuildAppOptions {
   batchRepository?: BatchRepository;
   /** Repository de session Jour J injecté (tests) ; sinon adossé à Prisma. */
   dayRepository?: DayRepository;
+  /** Repository du cycle post-Jour J injecté (tests) ; sinon adossé à Prisma. */
+  cycleRepository?: BatchCycleRepository;
   /** Repository de catalogue injecté (tests) ; sinon adossé à Prisma. */
   catalogRepository?: CatalogRepository;
   /** Repository de stock injecté (tests) ; sinon adossé à Prisma. */
@@ -144,6 +148,11 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     recipeRepository: opts.recipeRepository,
   });
   await app.register(batchDayRoutes, { prefix: "/api", dayRepository: opts.dayRepository });
+  await app.register(batchCycleRoutes, {
+    prefix: "/api",
+    cycleRepository: opts.cycleRepository,
+    repository: opts.batchRepository,
+  });
   await app.register(referentialsRoutes, {
     prefix: "/api",
     catalogRepository: opts.catalogRepository,
