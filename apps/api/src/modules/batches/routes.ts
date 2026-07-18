@@ -4,11 +4,14 @@ import { z } from "zod";
 
 import type { RecipeRepository } from "../recipes/repository.js";
 import { PrismaRecipeRepository } from "../recipes/repository.js";
+import { BatchOverviewService } from "./overview.service.js";
 import type { BatchRepository } from "./repository.js";
 import { PrismaBatchRepository } from "./repository.js";
 import {
   batchCreateBody,
   batchListQuery,
+  batchOverviewQuery,
+  brewedVolumeQuery,
   costQuery,
   measureCreateBody,
   measureListQuery,
@@ -36,10 +39,30 @@ export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (ap
   const repository = opts.repository ?? new PrismaBatchRepository(prisma);
   const recipeRepository = opts.recipeRepository ?? new PrismaRecipeRepository(prisma);
   const service = new BatchService(repository, recipeRepository);
+  // Le fuseau sert à exposer les échéances en date calendaire (cf. M9-07). Il
+  // passe par le repository, et non par Prisma en direct : les tests injectent
+  // un repository, ils n'ont pas de base.
+  const overview = new BatchOverviewService(repository, () => repository.timezone());
 
   app.get("/batches", { config: app.rbac("recettes", "read") }, async (request) => {
     const filters = batchListQuery.parse(request.query);
     return { batches: await service.list(filters) };
+  });
+
+  // Vue « Brassins » (M9-09) : étape courante et prochaine échéance en **un
+  // seul appel**, pour que la liste n'interroge pas une route par brassin.
+  // Sous-chemin statique, déclaré avant `/batches/:id` — sans quoi « overview »
+  // serait capté comme un identifiant de brassin.
+  app.get("/batches/overview", { config: app.rbac("recettes", "read") }, async (request) => {
+    const query = batchOverviewQuery.parse(request.query);
+    return await overview.list(query);
+  });
+
+  // Volume brassé agrégé — produit ici plutôt que recalculé par le tableau de
+  // bord (M13), pour qu'une agrégation métier n'existe pas en double.
+  app.get("/batches/brewed-volume", { config: app.rbac("recettes", "read") }, async (request) => {
+    const query = brewedVolumeQuery.parse(request.query);
+    return { brewedVolume: await overview.brewedVolume(query) };
   });
 
   app.get("/batches/:id", { config: app.rbac("recettes", "read") }, async (request) => {

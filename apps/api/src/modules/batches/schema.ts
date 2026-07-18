@@ -45,6 +45,34 @@ export type MeasureCreateBody = z.infer<typeof measureCreateBody>;
 export const measureListQuery = z.object({ type: measureTypeSchema.optional() });
 export type MeasureListQuery = z.infer<typeof measureListQuery>;
 
+/**
+ * Filtres de la vue « Brassins » enrichie (`GET /api/batches/overview`, M9-09).
+ * `status` accepte plusieurs valeurs (`?status=EN_BRASSAGE&status=EN_FERMENTATION`).
+ * `limit` est plafonné côté service pour ne pas dégrader la tablette quand
+ * l'historique grossira.
+ */
+export const batchOverviewQuery = z.object({
+  status: z
+    .union([batchStatusSchema, z.array(batchStatusSchema)])
+    .transform((v) => (Array.isArray(v) ? v : [v]))
+    .optional(),
+  recipeId: z.string().min(1).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  /** `ongoing` = ce qui réclame encore une action ; `finished` = clos ou annulé. */
+  scope: z.enum(["ongoing", "finished", "all"]).default("all"),
+  limit: z.coerce.number().int().positive().optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
+});
+export type BatchOverviewQuery = z.infer<typeof batchOverviewQuery>;
+
+/** Période du volume brassé agrégé (`GET /api/batches/brewed-volume`). */
+export const brewedVolumeQuery = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type BrewedVolumeQuery = z.infer<typeof brewedVolumeQuery>;
+
 /** Corps de transition de statut (`POST /api/batches/:id/status`). */
 export const statusChangeBody = z.object({ status: batchStatusSchema });
 export type StatusChangeBody = z.infer<typeof statusChangeBody>;
