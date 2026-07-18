@@ -11,6 +11,7 @@ export const KIND_LABELS: Record<CatalogKind, string> = {
   RECETTE: "Recette",
   BULK: "Vrac",
   CONDITIONNEMENT: "Conditionnement",
+  PRODUIT_FINI: "Produit fini",
 };
 
 export const UNIT_LABELS: Record<StockUnit, string> = {

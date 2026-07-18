@@ -117,9 +117,21 @@ enum DayPhase {
   EMPATAGE
   FILTRATION
   EBULLITION
+  WHIRLPOOL
   REFROIDISSEMENT
   ENSEMENCEMENT
   TERMINE
+}
+
+/// Phase du cycle **post-ensemencement** d'un brassin (M9, FORMULES §13.1).
+/// Distinct de `DayPhase` : le Jour J s'arrête à l'ensemencement, ces phases-ci
+/// courent sur plusieurs semaines. `DRY_HOP` est **conditionnelle** — elle
+/// n'existe que si la recette porte un houblon en `use = DRY_HOP`.
+enum BatchMilestoneKind {
+  FERMENTATION
+  DRY_HOP
+  COLD_CRASH
+  GARDE
 }
 
 /// Type de correction densité/volume pré-ébullition proposée puis journalisée
@@ -132,10 +144,16 @@ enum CorrectionType {
 }
 
 /// Logique de stock d'un article de catalogue (§3.3).
+/// `PRODUIT_FINI` (M9) : boisson conditionnée, issue d'un brassin. Alimenté par
+/// le conditionnement (M9-08) via un `StockMovement(reason: PRODUCTION)` et
+/// **décrémenté par les ventes** grâce au pipeline hub caisse existant (M7),
+/// sans code nouveau : `SkuMapping` et `DisplayScreenItem` référencent déjà
+/// `CatalogItem`. Cf. SPEC-ORCHESTRATION §9.2 (Q10).
 enum CatalogKind {
   RECETTE
   BULK
   CONDITIONNEMENT
+  PRODUIT_FINI
 }
 
 /// Unité de stock d'un article. Unités internes g/L ; `UNIT` pour le comptable
@@ -251,6 +269,21 @@ model Settings {
   /// (M6 ; ADR-01 : aucune constante métier hardcodée hors de cette table).
   membershipPeriodDays Int @default(365)
 
+  /// Durées **par défaut** du cycle post-ensemencement, en **jours** entiers
+  /// (M9, FORMULES §13.1). ADR-01 : ce sont des paramètres métier, jamais des
+  /// constantes de `core` — elles sont lues ici puis **fournies en entrée** au
+  /// calcul des jalons. Ajustables par brassin à la validation de l'ensemencement.
+  defaultFermentationDays Int @default(14)
+  defaultDryHopDays       Int @default(3)
+  defaultColdCrashDays    Int @default(2)
+  defaultConditioningDays Int @default(21)
+
+  /// Délai, en **minutes** avant le hors-flamme, auquel se déclenche l'étape
+  /// d'assainissement du circuit de refroidissement (M9-03). Paramètre et non
+  /// constante : il dépend de l'installation. ADR-11 — cette étape est un
+  /// **indicateur d'aide à la décision**, jamais une garantie de stérilité.
+  coolingCircuitSanitizeLeadMin Int @default(5)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -285,6 +318,7 @@ model User {
   stockMovements StockMovement[]
   inventories    StockReservation[]
   auditLogs      AuditLog[]
+  packagings     BatchPackaging[]
 }
 
 /// Session serveur persistée (ADR-10 : cookie + session en DB). Le token brut
@@ -345,8 +379,8 @@ model Member {
   /// `Settings.membershipPeriodDays` (statut dérivé, `membership` = cache).
   lastContributionAt DateTime?
 
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user     User?
   consents MemberConsent[]
@@ -555,17 +589,87 @@ model Batch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  brewers        BatchBrewer[]
-  measures       BatchMeasure[]
-  deviationLogs  DeviationLog[]
-  correctionLogs BatchCorrectionLog[]
-  dayEventLogs   DayEventLog[]
-  dayState       BatchDayState?
-  movements      StockMovement[]
-  reservations   StockReservation[]
+  brewers          BatchBrewer[]
+  measures         BatchMeasure[]
+  deviationLogs    DeviationLog[]
+  correctionLogs   BatchCorrectionLog[]
+  dayEventLogs     DayEventLog[]
+  dayState         BatchDayState?
+  movements        StockMovement[]
+  reservations     StockReservation[]
+  milestones       BatchMilestone[]
+  packagings       BatchPackaging[]
+  /// Articles de catalogue `PRODUIT_FINI` issus de ce brassin (M9).
+  finishedProducts CatalogItem[]
 
   @@index([recipeId])
   @@index([status])
+}
+
+/// Jalon daté du cycle **post-ensemencement** d'un brassin (M9, FORMULES §13.1).
+/// Les dates prévues sont calculées par `core` (`buildBatchMilestones`) depuis la
+/// date d'ensemencement et les durées saisies ; les dates **réelles** sont
+/// renseignées au fil de l'eau. Un jalon achevé (`actualEndAt` non nul) n'est
+/// jamais réécrit par un changement de prévision (M9-07).
+model BatchMilestone {
+  id      String             @id @default(cuid())
+  batchId String
+  batch   Batch              @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  kind    BatchMilestoneKind
+
+  /// Durée prévue, en **jours** entiers, bornée [0, 365] (validation `core`).
+  /// Une durée nulle **supprime** la phase : elle ne produit pas de jalon.
+  plannedDurationDays Int
+  plannedStartAt      DateTime
+  plannedEndAt        DateTime
+  actualStartAt       DateTime?
+  actualEndAt         DateTime?
+
+  /// Rang dans la séquence FERMENTATION → DRY_HOP → COLD_CRASH → GARDE.
+  sortOrder Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([batchId, kind])
+  @@index([batchId])
+  /// Sert les échéances de la vue Brassins (M9-09) et la tuile du tableau de bord (M13).
+  @@index([plannedEndAt])
+}
+
+/// Ligne de conditionnement d'un brassin (M9, FORMULES §13.3) : « ce brassin a
+/// produit N contenants de X litres ». Répond à la traçabilité « quel brassin
+/// est dans ces bouteilles ». Le stock, lui, est porté par le `StockMovement`
+/// append-only écrit dans la même transaction (M9-08) — cette table est le
+/// détail par contenant, pas le registre de stock.
+model BatchPackaging {
+  id      String @id @default(cuid())
+  batchId String
+  batch   Batch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  /// Article `PRODUIT_FINI` créé ou incrémenté par ce conditionnement.
+  catalogItemId String
+  catalogItem   CatalogItem @relation("PackagedProduct", fields: [catalogItemId], references: [id], onDelete: Restrict)
+
+  /// Article `CONDITIONNEMENT` consommé (bouteille, fût…). Nullable : un
+  /// conditionnement peut être enregistré sans que le contenant soit suivi en stock.
+  containerItemId String?
+  containerItem   CatalogItem? @relation("PackagingContainer", fields: [containerItemId], references: [id], onDelete: SetNull)
+
+  /// Contenance unitaire en **litres** (unité interne, jamais en centilitres).
+  /// Figée ici plutôt que lue du catalogue : elle doit rester celle du jour du
+  /// conditionnement même si l'article de catalogue évolue ensuite.
+  containerVolumeL Float
+  /// Nombre de contenants produits (entier — on ne conditionne pas 2,5 bouteilles).
+  quantity         Int
+
+  packagedAt   DateTime @default(now())
+  packagedById String?
+  packagedBy   User?    @relation(fields: [packagedById], references: [id], onDelete: SetNull)
+  note         String?
+
+  @@index([batchId])
+  @@index([catalogItemId])
 }
 
 /// Brasseur(s) responsable(s) d'un batch (jointure N–N).
@@ -582,6 +686,10 @@ model BatchBrewer {
 
 /// Mesure réelle relevée sur un batch (append-only). `phase` = phase Jour J ou
 /// de fermentation ; `loggedBy` = utilisateur.
+/// M9 — les **prises de volume** aux étapes clés (pré-ébullition, post-ébullition,
+/// ensemencement, conditionné) n'appellent **aucune structure nouvelle** :
+/// `MeasureType.VOLUME` existe déjà et `phase` qualifie l'étape. La chaîne des
+/// volumes (FORMULES §13.2) se dérive de ces lignes.
 model BatchMeasure {
   id         String      @id @default(cuid())
   batchId    String
@@ -691,15 +799,27 @@ model CatalogItem {
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
+  /// Pour un `PRODUIT_FINI` (M9) : brassin d'origine. Nul pour toute autre
+  /// famille. L'unité de stock est le **brassin**, pas la recette — deux brassins
+  /// d'une même recette donnent deux articles distincts, sans quoi la traçabilité
+  /// de lot (rappel, DLU, écart qualité) serait perdue.
+  sourceBatchId String?
+  sourceBatch   Batch?  @relation(fields: [sourceBatchId], references: [id], onDelete: SetNull)
+
   lots              StockLot[]
   movements         StockMovement[]
   reservations      StockReservation[]
   recipeIngredients RecipeIngredient[]
   skuMappings       SkuMapping[]
   displayItems      DisplayScreenItem[]
+  /// Conditionnements ayant produit cet article (quand il est `PRODUIT_FINI`).
+  packagedAs        BatchPackaging[]    @relation("PackagedProduct")
+  /// Conditionnements ayant consommé cet article comme contenant.
+  usedAsContainer   BatchPackaging[]    @relation("PackagingContainer")
 
   @@index([kind])
   @@index([category])
+  @@index([sourceBatchId])
 }
 
 /// Lot physique d'un article (quantité, DLU, coût d'achat). La quantité courante

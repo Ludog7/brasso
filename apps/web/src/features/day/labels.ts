@@ -11,6 +11,7 @@ export const DAY_PHASE_LABELS: Record<DayPhase, string> = {
   EMPATAGE: "Empâtage",
   FILTRATION: "Filtration",
   EBULLITION: "Ébullition",
+  WHIRLPOOL: "Whirlpool",
   REFROIDISSEMENT: "Refroidissement",
   ENSEMENCEMENT: "Ensemencement",
   TERMINE: "Terminé",

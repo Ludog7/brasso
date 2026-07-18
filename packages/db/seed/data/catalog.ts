@@ -449,6 +449,30 @@ const PACKAGING: SeedCatalogItem[] = [
     defaultUnitCostCents: 5,
     reorderThreshold: null,
   },
+  {
+    id: "cat-pkg-keg-30",
+    name: "Fût inox 30 L",
+    kind: CatalogKind.CONDITIONNEMENT,
+    category: null,
+    unit: StockUnit.UNIT,
+    attributes: { volumeL: 30 },
+    defaultUnitCostCents: 10000,
+    reorderThreshold: null,
+  },
+  {
+    // Bouteille à fermeture mécanique : contenant **réutilisable**, repris et
+    // relavé après consommation. `reusable` est porté ici pour que le retour de
+    // consigne puisse s'y accrocher plus tard sans migration ; M9 la traite
+    // comme un contenant ordinaire.
+    id: "cat-pkg-bottle-swingtop-75",
+    name: "Bouteille mécanique 75 cl (réutilisable)",
+    kind: CatalogKind.CONDITIONNEMENT,
+    category: null,
+    unit: StockUnit.UNIT,
+    attributes: { volumeL: 0.75, reusable: true },
+    defaultUnitCostCents: 150,
+    reorderThreshold: null,
+  },
 ];
 
 /** Bulk : gaz, produits de nettoyage/désinfection (mouvements forfaitaires). */
