@@ -94,15 +94,25 @@ function offsetMsAt(epochMs: number, timeZone: string): number {
  * Recompose l'instant correspondant à des champs de calendrier **locaux**.
  *
  * Le décalage à appliquer dépend de l'instant… qu'on cherche justement à
- * déterminer. On résout par deux passes : une première estimation avec le
- * décalage en vigueur à l'instant « comme si c'était UTC », puis une correction
- * avec le décalage réellement en vigueur à cette estimation. Deux passes
- * suffisent, les décalages ne variant que de quelques heures.
+ * déterminer. On calcule donc deux candidats — l'un avec le décalage en vigueur
+ * « comme si les champs étaient UTC », l'autre avec celui en vigueur à cette
+ * première estimation. Hors changement d'heure, les deux coïncident.
  *
- * Heures locales ambiguës (reculer l'heure) ou inexistantes (avancer l'heure) :
- * on renvoie un instant voisin cohérent plutôt que d'échouer — le cycle d'un
- * brassin ne se joue pas à l'heure près, et lever une exception ici bloquerait
- * un ensemencement pour un cas sans portée métier.
+ * Quand ils diffèrent, un changement d'heure sépare les deux candidats. On
+ * tranche en **relisant** le candidat le plus tôt : s'il redonne exactement les
+ * champs demandés, c'est le bon — il ne faut pas avancer.
+ *
+ * Ne pas court-circuiter ce contrôle en prenant systématiquement l'un des deux :
+ * - toujours le plus tôt ⇒ faux dans un **trou** (heure locale sautée au passage
+ *   à l'heure d'été). Sur un fuseau dont la transition tombe à **minuit**
+ *   — Santiago, La Havane, Asuncion — reculer traverse la frontière de date et
+ *   date le jalon de la veille (#255) ;
+ * - toujours le plus tard ⇒ faux quand l'heure demandée est parfaitement valide
+ *   mais que la sonde initiale, elle, tombe de l'autre côté d'une transition
+ *   proche (observé à Sydney et Lord Howe). Le jalon gagne alors un jour.
+ *
+ * C'est la date qui porte tout le sens d'un jalon ; l'heure exacte à laquelle
+ * démarre une garde de trois semaines n'a, elle, aucune portée métier.
  */
 function epochFromZonedParts(parts: ZonedParts, timeZone: string): number {
   const asUtc = Date.UTC(
@@ -114,8 +124,16 @@ function epochFromZonedParts(parts: ZonedParts, timeZone: string): number {
     parts.second,
     parts.millisecond,
   );
-  const firstGuess = asUtc - offsetMsAt(asUtc, timeZone);
-  return asUtc - offsetMsAt(firstGuess, timeZone);
+  const offsetBefore = offsetMsAt(asUtc, timeZone);
+  const offsetAfter = offsetMsAt(asUtc - offsetBefore, timeZone);
+  if (offsetBefore === offsetAfter) return asUtc - offsetBefore;
+
+  const earlier = Math.min(asUtc - offsetBefore, asUtc - offsetAfter);
+  const later = Math.max(asUtc - offsetBefore, asUtc - offsetAfter);
+  // `earlier` se relit-il sur les champs demandés ? Si oui il les représente
+  // fidèlement ; sinon l'heure locale n'existe pas et `later` tombe juste après
+  // le saut, donc à la bonne date.
+  return earlier + offsetMsAt(earlier, timeZone) === asUtc ? earlier : later;
 }
 
 /**
