@@ -98,6 +98,50 @@ describe("addCalendarDays — arithmétique calendaire", () => {
     );
   });
 
+  describe("fuseau dont le changement d'heure tombe à minuit (#255)", () => {
+    /**
+     * Santiago avance ses horloges **à minuit** : l'heure locale juste après
+     * minuit n'existe pas ce jour-là. Résoudre en **reculant** traverserait alors
+     * la frontière de date et daterait le jalon de la veille — le bug #255. La
+     * désambiguïsation doit avancer après le saut, pas reculer avant.
+     */
+    const SANTIAGO = "America/Santiago";
+
+    it("le 1972-10-15, minuit saute à 01:00 : +11 jours reste le 15, pas le 14", () => {
+      const start = at("1972-10-04T04:17:00Z"); // 00:17 locale à Santiago
+      expect(calendarDateInZone(start, SANTIAGO)).toBe("1972-10-04");
+      expect(calendarDateInZone(addCalendarDays(start, 11, SANTIAGO), SANTIAGO)).toBe("1972-10-15");
+    });
+
+    it("second cas relevé : +177 jours depuis le 2045-03-10", () => {
+      const start = at("2045-03-10T03:35:00Z");
+      expect(calendarDateInZone(addCalendarDays(start, 177, SANTIAGO), SANTIAGO)).toBe(
+        "2045-09-03",
+      );
+    });
+
+    it("l'heure inexistante est repoussée après le saut, jamais avant", () => {
+      const start = at("1972-10-04T04:17:00Z");
+      const end = addCalendarDays(start, 11, SANTIAGO);
+      // 00:17 n'existant pas le 15, on retombe sur 01:17 — après le saut.
+      expect(new Date(end).toISOString()).toBe("1972-10-15T04:17:00.000Z");
+    });
+
+    /**
+     * Symétrique du précédent, et le piège de la correction : ici l'heure locale
+     * demandée est **parfaitement valide**, mais la sonde initiale tombe de
+     * l'autre côté d'une transition proche. Avancer systématiquement ferait
+     * gagner un jour au jalon. Sydney sort de l'heure d'été le 2026-04-05.
+     */
+    it("heure locale valide près d'une transition : la date n'avance pas indûment", () => {
+      const SYDNEY = "Australia/Sydney";
+      const start = at("2026-04-03T12:30:00Z"); // 23:30 locale le 3 avril
+      expect(calendarDateInZone(start, SYDNEY)).toBe("2026-04-03");
+      expect(calendarDateInZone(addCalendarDays(start, 1, SYDNEY), SYDNEY)).toBe("2026-04-04");
+      expect(calendarDateInZone(addCalendarDays(start, 365, SYDNEY), SYDNEY)).toBe("2027-04-03");
+    });
+  });
+
   describe("heures locales ambiguës ou inexistantes (bords du changement d'heure)", () => {
     it("heure inexistante : renvoie un instant voisin cohérent, sans lever", () => {
       // À Paris le 29 mars 2026, 02:30 locale n'existe pas (2h → 3h).
@@ -108,12 +152,24 @@ describe("addCalendarDays — arithmétique calendaire", () => {
       expect(Number.isFinite(after)).toBe(true);
     });
 
-    it("heure ambiguë : renvoie l'une des deux occurrences, sans lever", () => {
-      // Le 25 octobre 2026, 02:30 locale survient deux fois à Paris.
+    it("heure ambiguë : les deux occurrences portent la même date, le choix est neutre", () => {
+      // Le 25 octobre 2026, 02:30 locale survient deux fois à Paris : en UTC+2
+      // (00:30Z) puis en UTC+1 (01:30Z). Quelle que soit celle retenue, la date
+      // est la même — c'est la définition de l'ambiguïté.
       const before = new Date("2026-10-24T02:30:00+02:00").getTime();
       const after = addCalendarDays(before, 1, PARIS);
       expect(calendarDateInZone(after, PARIS)).toBe("2026-10-25");
-      expect(Number.isFinite(after)).toBe(true);
+      expect(["2026-10-25T00:30:00.000Z", "2026-10-25T01:30:00.000Z"]).toContain(
+        new Date(after).toISOString(),
+      );
+    });
+
+    it("un jour supprimé du calendrier : on avance au jour suivant existant", () => {
+      // Kiritimati a franchi la ligne de changement de date fin 1994 : le
+      // 1994-12-31 n'y a jamais existé. Viser cette date doit donner le 1995-01-01.
+      const start = at("1994-12-24T22:00:00Z");
+      const end = addCalendarDays(start, 7, "Pacific/Kiritimati");
+      expect(calendarDateInZone(end, "Pacific/Kiritimati")).toBe("1995-01-01");
     });
   });
 });
