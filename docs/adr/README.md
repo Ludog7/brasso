@@ -51,4 +51,4 @@ Un ADR qui **amende** une décision du §0 doit laisser la spec cohérente : ajo
 | ADR-01 → ADR-11 | Décisions fondatrices | Figées — voir `SPEC-ORCHESTRATION.md` §0 |
 | ADR-12 | Extension de la matrice RBAC (ressources `taches`, `agenda`, `parametres` élargi) | Prévu — ticket M10-01 |
 | ADR-13 | Bascule d'utilisateur par PIN (amende ADR-10) | Prévu — ticket M10-02 |
-| ADR-14 | Thème clair par défaut & thème dérivé d'une couleur de marque (amende ADR-05) | Prévu — ticket M10-03 |
+| ADR-14 | Thème clair par défaut, basculable en sombre, & thème dérivé d'une couleur de marque (amende ADR-05) | Sens tranché (2026-07-18) — rédaction au ticket M10-03 |

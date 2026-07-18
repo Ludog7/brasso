@@ -26,12 +26,12 @@ La brasserie configure son **nom, son logo et sa couleur de marque** dans les Op
 |---|---|---|
 | **M10-01** | `adr` | **ADR-12** — extension de la matrice RBAC §3.5 : ressources `taches` et `agenda`, élargissement de `parametres`. Acte « presets lisibles, matrice **non éditable** » (§9.2 Q9) et réaffirme le deny-by-default. **Prérequis de tout le milestone.** |
 | **M10-02** | `adr` | **ADR-13** (amende ADR-10) — bascule d'utilisateur par PIN : PIN Argon2id, session courte, verrouillage automatique, rate-limit et blocage après N échecs. |
-| **M10-03** | `adr` | **ADR-14** (amende ADR-05) — thème **clair par défaut** + thème dérivé d'une couleur de marque. ⚠️ Contradiction directe à trancher : ADR-05 et §6 imposent « mode sombre par défaut ». Traiter l'impact sur le contraste AA en atelier. |
+| **M10-03** | `adr` | **ADR-14** (amende ADR-05) — thème **clair par défaut**, **bascule clair/sombre dans les Options**, thème dérivé d'une couleur de marque. **Sens tranché par Ludo** (2026-07-18) ; le ticket rédige l'ADR et met la spec en cohérence. ⚠️ Amender **deux** emplacements : ADR-05 (§0) **et** §6, qui imposent tous deux « mode sombre par défaut ». Contrainte : **contraste AA dans les deux thèmes**. |
 | **M10-04** | `db` | Migration « options & identité » : champs `Settings` (apparence, services, géolocalisation météo, templates), `User.pinHash` + métadonnées de verrouillage. |
 | **M10-05** | `api` | Module `settings` : lecture/écriture des options générales sous RBAC `parametres` ; secrets **jamais** en base (SMTP en variables d'environnement). |
 | **M10-06** | `api` | Bascule d'utilisateur par PIN : pose/réinitialisation du PIN, ré-authentification, session courte, verrouillage auto, **rate-limit et blocage** (ADR-13). |
-| **M10-07** | `web` | Fondations design system : jetons de thème, dérivation de la couleur de contraste depuis la couleur de marque, bascule clair/sombre, primitives d'**états vides / chargement / erreur** réutilisables. Socle du fil rouge UX (§4). |
-| **M10-08** | `web` | Volet « Options générales » : sous-volets Apparence, Accès (**restitution en lecture** de la matrice), Services, Templates. |
+| **M10-07** | `web` | Fondations design system : jetons de thème, dérivation de la couleur de contraste depuis la couleur de marque, **thème clair par défaut** avec bascule clair/sombre persistée, primitives d'**états vides / chargement / erreur** réutilisables. Socle du fil rouge UX (§4). Vérifier le **contraste AA dans les deux thèmes**. |
+| **M10-08** | `web` | Volet « Options générales » : sous-volets Apparence (dont la **bascule clair/sombre**), Accès (**restitution en lecture** de la matrice, rôle `caisse` affiché « **Trésorier / Caisse** »), Services, Templates. |
 | **M10-09** | `web` | Bandeau : logo, nom de la brasserie, **badge de l'utilisateur actif**, bascule d'utilisateur en 2 clics + saisie du PIN. |
 | **M10-10** | `web` | Application homogène du thème à l'existant + passe responsive et états vides sur les écrans déjà livrés. |
 
@@ -40,7 +40,8 @@ Bloqué par : validation de la démo M9. **M10-01 à M10-03 (ADR) bloquent tous 
 Bloque : M11 (templates de cartes du bar), M12 (services email), M13 (ressources RBAC `taches` et `agenda`).
 
 ## Points de vigilance
-- **Question remontée, non tranchée** (§9.2 Q9) : le brief nomme le profil « trésorier », le code porte `caisse`. Recommandation — conserver la clé `caisse`, n'ajuster que le libellé affiché. **À confirmer par Ludo avant M10-01.**
+- **Tranché** (§9.2 Q9, Ludo le 2026-07-18) : la clé **`caisse` est conservée** ; seul le **libellé affiché** devient « Trésorier / Caisse » (M10-08). Aucune migration, aucun changement de `Role.key`, aucun impact RBAC — ne pas transformer un libellé en renommage de clé.
+- **Tranché** : thème **clair par défaut**, **basculable clair/sombre dans les Options** (M10-03/M10-07). Le mode sombre n'est pas retiré, il devient un choix utilisateur.
 - Le PIN est une commodité qui **abaisse** le niveau d'authentification : rate-limit et blocage ne sont pas optionnels.
 - Le sous-volet « Accès » **restitue** la matrice, il ne l'édite pas : ne pas laisser l'UI suggérer une modification impossible.
 - Cadence checkpoint + feu vert après chaque ticket.
