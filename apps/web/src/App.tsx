@@ -67,6 +67,11 @@ const DisplayScreenPage = lazy(() =>
 const AuditPage = lazy(() =>
   import("@/routes/audit/AuditPage").then((m) => ({ default: m.AuditPage })),
 );
+// Vue « Brassins » (M9-10) — chargée à la demande comme les autres routes, pour
+// ne pas alourdir le socle initial (budget de chunk surveillé, cf. DEV.md).
+const BatchesListPage = lazy(() =>
+  import("@/routes/batches/BatchesListPage").then((m) => ({ default: m.BatchesListPage })),
+);
 const PlanBatchPage = lazy(() =>
   import("@/routes/batches/PlanBatchPage").then((m) => ({ default: m.PlanBatchPage })),
 );
@@ -141,6 +146,7 @@ export function App() {
           <Route path="/contributions" element={<ContributionsPage />} />
           <Route path="/equipment/new" element={<NewEquipmentPage />} />
           <Route path="/equipment/:id/edit" element={<EditEquipmentPage />} />
+          <Route path="/batches" element={<BatchesListPage />} />
           <Route path="/batches/new/:recipeId" element={<PlanBatchPage />} />
           <Route path="/batches/:id" element={<BatchDetailPage />} />
           <Route path="/batches/:id/day" element={<DayScreen />} />

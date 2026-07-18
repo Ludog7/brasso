@@ -3,6 +3,7 @@ import {
   Calculator,
   Coins,
   FileSpreadsheet,
+  FlaskConical,
   Loader2,
   LogOut,
   MonitorPlay,
@@ -69,6 +70,14 @@ export function HomePage() {
             <Link to="/recipes">
               <BookOpen className="size-5" aria-hidden="true" />
               Recettes
+            </Link>
+          </Button>
+          {/* Point d'entrée du suivi des brassins (M9-10) : placé juste après
+              les recettes, puisqu'un brassin naît d'une recette publiée. */}
+          <Button asChild size="lg" variant="outline" className="self-start">
+            <Link to="/batches">
+              <FlaskConical className="size-5" aria-hidden="true" />
+              Brassins
             </Link>
           </Button>
           <Button asChild size="lg" variant="outline" className="self-start">

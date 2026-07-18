@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type BatchCreateInput,
   batchesApi,
+  type BatchOverviewFilters,
   type BatchStatus,
   type MeasureCreateInput,
 } from "@/lib/api";
@@ -13,7 +14,43 @@ export const batchKeys = {
   detail: (id: string) => ["batches", "detail", id] as const,
   measures: (id: string) => ["batches", "measures", id] as const,
   cost: (id: string) => ["batches", "cost", id] as const,
+  overview: (filters: BatchOverviewFilters) => ["batches", "overview", filters] as const,
+  milestones: (id: string) => ["batches", "milestones", id] as const,
+  volumes: (id: string) => ["batches", "volumes", id] as const,
 };
+
+/**
+ * Vue « Brassins » (M9-09) — un seul appel pour toute la liste. Les filtres font
+ * partie de la clé de cache : changer un filtre est une autre question, pas une
+ * invalidation.
+ */
+export function useBatchesOverview(filters: BatchOverviewFilters = {}) {
+  return useQuery({
+    queryKey: batchKeys.overview(filters),
+    queryFn: () => batchesApi.overview(filters),
+    // La liste doit refléter l'atelier : une échéance franchie pendant qu'on la
+    // regarde n'a pas à attendre un rechargement de page.
+    staleTime: 30_000,
+  });
+}
+
+/** Jalons datés du cycle post-ensemencement d'un brassin (M9-07). */
+export function useBatchMilestones(id: string | undefined) {
+  return useQuery({
+    queryKey: batchKeys.milestones(id ?? ""),
+    queryFn: () => batchesApi.milestones(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+/** Chaîne des volumes et rendement de conditionnement d'un brassin (M9-06). */
+export function useBatchVolumes(id: string | undefined) {
+  return useQuery({
+    queryKey: batchKeys.volumes(id ?? ""),
+    queryFn: () => batchesApi.volumes(id as string),
+    enabled: Boolean(id),
+  });
+}
 
 /** Détail d'un batch (numéro, statut, réservations). */
 export function useBatch(id: string | undefined) {

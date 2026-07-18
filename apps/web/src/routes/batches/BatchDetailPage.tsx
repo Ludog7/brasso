@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { FermentationCharts } from "@/features/batches/charts/FermentationCharts";
 import { CostPanel } from "@/features/batches/CostPanel";
+import { CyclePanel } from "@/features/batches/CyclePanel";
 import { useBatch } from "@/features/batches/hooks";
 import { FERMENTATION_STEP_LABELS, STATUS_LABELS, STATUS_TONE } from "@/features/batches/labels";
 import { MeasuresJournal } from "@/features/batches/MeasuresJournal";
@@ -167,6 +168,9 @@ export function BatchDetailPage() {
             ) : null}
           </CardContent>
         </Card>
+
+        {/* Cycle post-ensemencement (M9-10) : jalons datés et chaîne des volumes. */}
+        <CyclePanel batchId={data.id} />
 
         <Card>
           <CardHeader>
