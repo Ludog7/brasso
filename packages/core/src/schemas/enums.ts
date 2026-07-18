@@ -68,8 +68,22 @@ export const batchStatusSchema = z.enum([
 /** Nature d'une mesure relevée sur un batch (Prisma `MeasureType`). */
 export const measureTypeSchema = z.enum(["GRAVITY", "TEMPERATURE", "PH", "VOLUME", "OTHER"]);
 
-/** Logique de stock d'un article (Prisma `CatalogKind`). */
-export const catalogKindSchema = z.enum(["RECETTE", "BULK", "CONDITIONNEMENT"]);
+/**
+ * Logique de stock d'un article (Prisma `CatalogKind`).
+ * `PRODUIT_FINI` (M9) : boisson conditionnée issue d'un brassin — alimentée par
+ * le conditionnement, décrémentée par les ventes via le pipeline M7 existant.
+ */
+export const catalogKindSchema = z.enum(["RECETTE", "BULK", "CONDITIONNEMENT", "PRODUIT_FINI"]);
+
+/**
+ * Phase du cycle **post-ensemencement** d'un brassin (Prisma
+ * `BatchMilestoneKind`, M9). Distinct des phases Jour J : le Jour J s'arrête à
+ * l'ensemencement, ces phases-ci courent sur plusieurs semaines. L'ordre des
+ * valeurs est celui de la séquence (FORMULES §13.1) ; `DRY_HOP` est
+ * **conditionnelle** — absente si la recette ne porte aucun houblon en
+ * `use = DRY_HOP`.
+ */
+export const batchMilestoneKindSchema = z.enum(["FERMENTATION", "DRY_HOP", "COLD_CRASH", "GARDE"]);
 
 /** Unité de stock (Prisma `StockUnit`). Unités internes g/L ; `UNIT` = comptable. */
 export const stockUnitSchema = z.enum(["GRAM", "LITER", "UNIT"]);
@@ -140,6 +154,7 @@ export type ProcessStepType = z.infer<typeof processStepTypeSchema>;
 export type BatchStatus = z.infer<typeof batchStatusSchema>;
 export type MeasureType = z.infer<typeof measureTypeSchema>;
 export type CatalogKind = z.infer<typeof catalogKindSchema>;
+export type BatchMilestoneKind = z.infer<typeof batchMilestoneKindSchema>;
 export type StockUnit = z.infer<typeof stockUnitSchema>;
 export type StockMovementReason = z.infer<typeof stockMovementReasonSchema>;
 export type ReservationStatus = z.infer<typeof reservationStatusSchema>;

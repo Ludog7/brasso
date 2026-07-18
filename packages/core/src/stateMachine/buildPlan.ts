@@ -18,12 +18,20 @@ import type { DayPlan, MeasurementKind, Phase, StepSpec } from "./types.js";
  * Enum des phases Jour J côté persistance (français) — miroir **exact** de l'enum
  * Prisma `DayPhase` (M1-01, `schema.prisma`). Valeurs recopiées, pas d'import DB
  * (ADR-03). `TERMINE` correspond au brassin achevé (pas une {@link Phase} core).
+ *
+ * `WHIRLPOOL` est ajouté par la migration M9-02 : la valeur est **persistable**
+ * dès maintenant, mais aucune {@link Phase} core ne la produit encore — c'est
+ * {@link mapStep} (M9-03) qui réintégrera l'étape au plan et complètera
+ * {@link phaseToDayPhase}. L'ordre de déclaration suit la séquence réelle du
+ * brassage (ébullition → whirlpool → refroidissement) et l'ordre physique de
+ * l'enum PostgreSQL.
  */
 export type DayPhase =
   | "INITIALISATION"
   | "EMPATAGE"
   | "FILTRATION"
   | "EBULLITION"
+  | "WHIRLPOOL"
   | "REFROIDISSEMENT"
   | "ENSEMENCEMENT"
   | "TERMINE";
