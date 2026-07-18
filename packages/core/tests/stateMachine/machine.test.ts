@@ -207,7 +207,7 @@ describe("VALIDATE_STEP — mode normal (conditions vérifiées)", () => {
     ];
     let s = transition(initDayState(plan), { type: "START_STEP", at: 0 }).state;
     const missing = transition(s, { type: "VALIDATE_STEP", at: 0 });
-    expect(missing.rejection).toContain("density, volume");
+    expect(missing.rejection).toContain("densité, volume");
 
     s = transition(s, { type: "RECORD_MEASUREMENT", at: 0, kind: "density", value: 1.05 }).state;
     const stillMissing = transition(s, { type: "VALIDATE_STEP", at: 0 });
@@ -404,9 +404,28 @@ describe("M9-03 — validation manuelle des étapes sans timer (bug « pas de ne
     const s = transition(initDayState(lauterPlan), { type: "START_STEP", at: 0 }).state;
     const check = stepValidationCheck(s, 0);
     expect(check.canValidate).toBe(false);
-    expect(check.blockedBy.join(" ")).toContain("density");
+    // Motif « rédigé pour l'affichage » (#266) : en français, sans identifiant interne.
+    expect(check.blockedBy).toContain("Mesures requises manquantes : densité, volume.");
+    expect(check.blockedBy.join(" ")).not.toMatch(/density|volume,/);
     // L'écran et la machine ne divergent pas : le refus reprend le même motif.
-    expect(transition(s, { type: "VALIDATE_STEP", at: 0 }).rejection).toContain("density");
+    expect(transition(s, { type: "VALIDATE_STEP", at: 0 }).rejection).toContain(
+      "Mesures requises manquantes : densité, volume.",
+    );
+  });
+
+  it("traduit les quatre types de mesure dans le motif de blocage (#266)", () => {
+    const plan: DayPlan = [
+      {
+        id: "all-1",
+        phase: "MASH",
+        requiresStabilization: false,
+        requiredMeasurements: ["density", "volume", "temperature", "ph"],
+      },
+    ];
+    const s = transition(initDayState(plan), { type: "START_STEP", at: 0 }).state;
+    expect(stepValidationCheck(s, 0).blockedBy).toContain(
+      "Mesures requises manquantes : densité, volume, température, pH.",
+    );
   });
 
   it("une étape non démarrée n'attend pas de validation manuelle", () => {
