@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDayPlan, type DayPhase, phaseToDayPhase } from "../../src/stateMachine/buildPlan.js";
+import {
+  buildDayPlan,
+  type DayPhase,
+  DEFAULT_AROMA_HOP_THRESHOLD_MIN,
+  phaseToDayPhase,
+} from "../../src/stateMachine/buildPlan.js";
 import {
   currentStep,
   initDayState,
@@ -460,6 +465,280 @@ describe("M9-03 — assainissement du circuit de refroidissement (étape dériv�
     expect(texte).not.toMatch(/stéril/i);
     expect(texte).not.toMatch(/conforme/i);
     expect(texte).not.toMatch(/\bsûre?\b/i);
+  });
+});
+
+describe("M9-04 — alertes de houblonnage pendant l'ébullition", () => {
+  /** Ingrédient houblon tel que figé dans le snapshot (miroir `RecipeIngredient`). */
+  const hop = (
+    name: string,
+    use: string,
+    timeMinutes?: number,
+    extra: Record<string, unknown> = {},
+  ): unknown => ({
+    category: "HOP",
+    name,
+    amount: 20,
+    unit: "GRAM",
+    use,
+    timeMinutes,
+    params: { alphaFraction: 0.06 },
+    ...extra,
+  });
+
+  const snapshotWithHops = (
+    ingredients: readonly unknown[],
+    steps: readonly unknown[] = [step("BOIL", { timeMin: 60 }), step("COOL", { targetTempC: 20 })],
+  ): unknown => ({ id: "r1", steps, ingredients });
+
+  it("critère observable : ébullition 60 min, ajouts à 60/15/0 restants → offsets 0/45/60, natures amérisant/aromatique/hors-flamme", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotWithHops([
+        hop("Citra", "BOIL", 0),
+        hop("Magnum", "BOIL", 60),
+        hop("Cascade", "BOIL", 15),
+      ]),
+    });
+    expect(byId(plan)["boil-1"]?.hopAdditions).toEqual([
+      {
+        name: "Magnum",
+        amountG: 20,
+        nature: "BITTERING",
+        remainingMin: 60,
+        offsetFromStartMin: 0,
+        inconsistent: false,
+      },
+      {
+        name: "Cascade",
+        amountG: 20,
+        nature: "AROMA",
+        remainingMin: 15,
+        offsetFromStartMin: 45,
+        inconsistent: false,
+      },
+      {
+        name: "Citra",
+        amountG: 20,
+        nature: "FLAME_OUT",
+        remainingMin: 0,
+        offsetFromStartMin: 60,
+        inconsistent: false,
+      },
+    ]);
+  });
+
+  it("FIRST_WORT : amérisant, vaut toute l'ébullition (offset 0), temps déclaré ignoré", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotWithHops([hop("Perle", "FIRST_WORT", 10)]),
+    });
+    expect(byId(plan)["boil-1"]?.hopAdditions).toEqual([
+      {
+        name: "Perle",
+        amountG: 20,
+        nature: "BITTERING",
+        remainingMin: 60,
+        offsetFromStartMin: 0,
+        inconsistent: false,
+      },
+    ]);
+  });
+
+  it("hors-flamme distinguable du dernier aromatique (natures distinctes)", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotWithHops([hop("Mosaic", "BOIL", 5), hop("Citra", "BOIL", 0)]),
+    });
+    const natures = byId(plan)["boil-1"]?.hopAdditions?.map((a) => a.nature);
+    expect(natures).toEqual(["AROMA", "FLAME_OUT"]);
+  });
+
+  it("restant > durée d'ébullition : offset borné à 0 et incohérence signalée", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotWithHops([hop("Herkules", "BOIL", 90)]),
+    });
+    expect(byId(plan)["boil-1"]?.hopAdditions).toEqual([
+      {
+        name: "Herkules",
+        amountG: 20,
+        nature: "BITTERING",
+        remainingMin: 90,
+        offsetFromStartMin: 0,
+        inconsistent: true,
+      },
+    ]);
+  });
+
+  it("tri stable : offset croissant, à égalité par nom (doublon toléré)", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotWithHops([
+        hop("Simcoe", "BOIL", 10),
+        hop("Amarillo", "BOIL", 10),
+        hop("Amarillo", "BOIL", 10), // même houblon ajouté deux fois au même moment
+        hop("Magnum", "BOIL", 60),
+        hop("Zeus", "BOIL", 10),
+      ]),
+    });
+    expect(byId(plan)["boil-1"]?.hopAdditions?.map((a) => a.name)).toEqual([
+      "Magnum",
+      "Amarillo",
+      "Amarillo",
+      "Simcoe",
+      "Zeus",
+    ]);
+  });
+
+  describe("seuil amérisant / aromatique", () => {
+    it("au seuil exact (défaut 20 min) : amérisant ; juste en deçà : aromatique", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([
+          hop("AuSeuil", "BOIL", DEFAULT_AROMA_HOP_THRESHOLD_MIN),
+          hop("SousLeSeuil", "BOIL", DEFAULT_AROMA_HOP_THRESHOLD_MIN - 1),
+        ]),
+      });
+      const byName = Object.fromEntries(
+        (byId(plan)["boil-1"]?.hopAdditions ?? []).map((a) => [a.name, a.nature]),
+      );
+      expect(byName).toEqual({ AuSeuil: "BITTERING", SousLeSeuil: "AROMA" });
+    });
+
+    it("le seuil est ajustable par l'appelant (aromaHopThresholdMin)", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([hop("Cascade", "BOIL", 25)]),
+        aromaHopThresholdMin: 30,
+      });
+      expect(byId(plan)["boil-1"]?.hopAdditions?.[0]?.nature).toBe("AROMA");
+    });
+
+    it("un seuil non fini retombe sur le défaut", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([hop("Cascade", "BOIL", 15)]),
+        aromaHopThresholdMin: Number.NaN,
+      });
+      expect(byId(plan)["boil-1"]?.hopAdditions?.[0]?.nature).toBe("AROMA");
+    });
+  });
+
+  describe("ajouts WHIRLPOOL", () => {
+    it("rattachés à l'étape whirlpool (offset 0, hors-flamme), pas à l'ébullition", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops(
+          [hop("Magnum", "BOIL", 60), hop("Galaxy", "WHIRLPOOL"), hop("Azacca", "WHIRLPOOL")],
+          [
+            step("BOIL", { timeMin: 60 }),
+            step("WHIRLPOOL", { timeMin: 15 }),
+            step("COOL", { targetTempC: 20 }),
+          ],
+        ),
+      });
+      const map = byId(plan);
+      expect(map["whirlpool-1"]?.hopAdditions).toEqual([
+        {
+          name: "Azacca",
+          amountG: 20,
+          nature: "FLAME_OUT",
+          remainingMin: 0,
+          offsetFromStartMin: 0,
+          inconsistent: false,
+        },
+        {
+          name: "Galaxy",
+          amountG: 20,
+          nature: "FLAME_OUT",
+          remainingMin: 0,
+          offsetFromStartMin: 0,
+          inconsistent: false,
+        },
+      ]);
+      expect(map["boil-1"]?.hopAdditions?.map((a) => a.name)).toEqual(["Magnum"]);
+    });
+
+    it("sans étape whirlpool au plan : repli en hors-flamme en fin d'ébullition", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([hop("Galaxy", "WHIRLPOOL")]),
+      });
+      expect(byId(plan)["boil-1"]?.hopAdditions).toEqual([
+        {
+          name: "Galaxy",
+          amountG: 20,
+          nature: "FLAME_OUT",
+          remainingMin: 0,
+          offsetFromStartMin: 60,
+          inconsistent: false,
+        },
+      ]);
+    });
+  });
+
+  describe("lecture défensive des ingrédients", () => {
+    it("ignore non-houblon, DRY_HOP, moment d'emploi hors ébullition, et lignes malformées", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([
+          null,
+          "bogus",
+          { name: "SansCatégorie", use: "BOIL", timeMinutes: 10 },
+          { category: "MALT", name: "Pilsner", amount: 5000, use: "BOIL", timeMinutes: 10 },
+          hop("Citra", "DRY_HOP", 0),
+          hop("Saaz", "MASH", 10),
+          hop("", "BOIL", 10), // nom vide
+          hop("SansTemps", "BOIL"), // temps non numérique → ignoré sans exception
+          hop("TempsTexte", "BOIL", "dix" as unknown as number),
+          hop("QuantitéKO", "BOIL", 10, { amount: "beaucoup" }),
+          hop("Magnum", "BOIL", 60),
+        ]),
+      });
+      expect(byId(plan)["boil-1"]?.hopAdditions?.map((a) => a.name)).toEqual(["Magnum"]);
+    });
+
+    it("snapshot sans houblon → aucune échéance, aucune erreur", () => {
+      for (const ingredients of [[], [{ category: "MALT", name: "Pilsner", amount: 5000 }]]) {
+        const plan = buildDayPlan({ recipeSnapshot: snapshotWithHops(ingredients) });
+        expect(plan.every((s) => s.hopAdditions === undefined)).toBe(true);
+      }
+    });
+
+    it("ingrédients absents ou non-tableau → aucune échéance, aucune erreur", () => {
+      for (const recipeSnapshot of [
+        snapshotOf([step("BOIL", { timeMin: 60 })]), // pré-M9 : pas de clé ingredients lue
+        { id: "r1", steps: [step("BOIL", { timeMin: 60 })], ingredients: "nope" },
+      ]) {
+        const plan = buildDayPlan({ recipeSnapshot });
+        expect(plan.every((s) => s.hopAdditions === undefined)).toBe(true);
+      }
+    });
+
+    it("sans durée d'ébullition connue, aucun offset n'est calculable → pas d'échéance d'ébullition", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops(
+          [hop("Magnum", "BOIL", 60), hop("Perle", "FIRST_WORT"), hop("Galaxy", "WHIRLPOOL")],
+          [step("BOIL", {}), step("COOL", { targetTempC: 20 })],
+        ),
+      });
+      expect(plan.every((s) => s.hopAdditions === undefined)).toBe(true);
+    });
+
+    it("ajout WHIRLPOOL rattaché au whirlpool même sans durée d'ébullition", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops(
+          [hop("Galaxy", "WHIRLPOOL"), hop("Magnum", "BOIL", 60)],
+          [step("BOIL", {}), step("WHIRLPOOL", { timeMin: 15 })],
+        ),
+      });
+      const map = byId(plan);
+      expect(map["whirlpool-1"]?.hopAdditions?.map((a) => a.name)).toEqual(["Galaxy"]);
+      expect(map["boil-1"]?.hopAdditions).toBeUndefined();
+    });
+  });
+
+  it("la scission d'assainissement (M9-03) conserve les échéances sur l'étape d'ébullition", () => {
+    const plan = buildDayPlan({
+      recipeSnapshot: snapshotWithHops([hop("Magnum", "BOIL", 60), hop("Citra", "BOIL", 0)]),
+      coolingCircuitSanitizeLeadMin: 5,
+    });
+    const map = byId(plan);
+    expect(map["boil-1"]?.plannedHoldMin).toBe(55);
+    // Les offsets restent relatifs au début de l'ébullition : la scission
+    // conserve le début et la durée totale (55 + 5 = 60).
+    expect(map["boil-1"]?.hopAdditions?.map((a) => a.offsetFromStartMin)).toEqual([0, 60]);
+    expect(map["boil-sanitize-1"]?.hopAdditions).toBeUndefined();
   });
 });
 

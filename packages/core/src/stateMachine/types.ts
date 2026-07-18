@@ -32,6 +32,49 @@ export type MeasurementKind = "density" | "volume" | "temperature" | "ph";
 export type MeasurementSource = "manual" | "sensor";
 
 /**
+ * Nature d'un ajout de houblon pendant l'ébullition (M9-04), au sens de
+ * `FORMULES-BRASSICOLES.md` §4.3 :
+ * - `BITTERING` — amérisant : `use = BOIL` à temps restant élevé, et `FIRST_WORT` ;
+ * - `AROMA` — aromatique : `use = BOIL` à temps restant court ;
+ * - `FLAME_OUT` — hors-flamme : `use = BOIL` à temps restant **0**, et
+ *   `use = WHIRLPOOL`. C'est cet ajout que l'UI doit alerter à l'extinction du
+ *   feu, distinctement du dernier aromatique.
+ */
+export type HopAdditionNature = "BITTERING" | "AROMA" | "FLAME_OUT";
+
+/**
+ * Échéance d'ajout de houblon attachée à une étape du plan (M9-04) — l'UI alerte
+ * au bon moment sans redécouvrir la recette. L'offset est **relatif** au début de
+ * l'étape de rattachement : aucune horloge, aucun « maintenant » dans `core`,
+ * l'ancrage temporel est fait par l'appelant (ADR-03/ADR-08).
+ */
+export interface HopAdditionAlert {
+  /** Nom du houblon, tel que figé dans le snapshot. */
+  readonly name: string;
+  /** Quantité à ajouter (g, unité interne). */
+  readonly amountG: number;
+  readonly nature: HopAdditionNature;
+  /**
+   * Temps d'ébullition **restant** déclaré par la recette (min) — la convention
+   * d'écriture des recettes. `0` pour un hors-flamme / whirlpool.
+   */
+  readonly remainingMin: number;
+  /**
+   * Offset (min) depuis le **début de l'étape de rattachement**, en temps
+   * **écoulé** — la convention d'un timer Jour J :
+   * `durée d'ébullition − temps restant`. Les deux conventions sont exposées
+   * pour qu'aucun consommateur ne refasse la soustraction (source classique
+   * d'inversion de signe).
+   */
+  readonly offsetFromStartMin: number;
+  /**
+   * Temps restant déclaré > durée d'ébullition : l'offset est borné à 0 (début
+   * d'ébullition) et l'incohérence est **signalée** plutôt que masquée.
+   */
+  readonly inconsistent: boolean;
+}
+
+/**
  * Spécification d'une étape du plan (le « modèle » dérivé de la recette / du
  * profil matériel). Le plan est une liste ordonnée de `StepSpec` : répéter une
  * phase `MASH` modélise naturellement un empâtage multi-paliers.
@@ -67,6 +110,13 @@ export interface StepSpec {
   readonly targetTempConstraint?: "at_most" | "at_least";
   /** Mesures exigées pour **valider en mode normal** (ignorées si on force l'étape). */
   readonly requiredMeasurements?: readonly MeasurementKind[];
+  /**
+   * Échéances d'ajout de houblon de l'étape (M9-04), triées par offset croissant
+   * (à égalité, par nom). Portées par l'étape `BOIL` (amérisants, aromatiques,
+   * hors-flamme) et par l'étape `WHIRLPOOL` (ajouts au whirlpool). Absent si
+   * l'étape n'en comporte aucune.
+   */
+  readonly hopAdditions?: readonly HopAdditionAlert[];
 }
 
 /**

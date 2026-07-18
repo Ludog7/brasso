@@ -12,7 +12,7 @@
  */
 
 import { defaultDayPlan } from "./plan.js";
-import type { DayPlan, MeasurementKind, Phase, StepSpec } from "./types.js";
+import type { DayPlan, HopAdditionAlert, MeasurementKind, Phase, StepSpec } from "./types.js";
 
 /**
  * Enum des phases Jour J côté persistance (français) — miroir **exact** de l'enum
@@ -85,7 +85,24 @@ export interface BuildDayPlanInput {
    * rien inventer plutôt que de supposer un délai : l'API le lit des `Settings`.
    */
   readonly coolingCircuitSanitizeLeadMin?: number;
+  /**
+   * Seuil (min de temps d'ébullition **restant**) en deçà duquel un ajout de
+   * houblon `use = BOIL` est classé **aromatique** plutôt qu'amérisant (M9-04).
+   * Défaut : {@link DEFAULT_AROMA_HOP_THRESHOLD_MIN}. Une valeur non finie
+   * retombe sur le défaut.
+   */
+  readonly aromaHopThresholdMin?: number;
 }
+
+/**
+ * Seuil par défaut (min de temps restant) séparant ajout **amérisant** et
+ * **aromatique** (M9-04, FORMULES §4.3). Motif du choix (~20 min) : au-delà,
+ * l'isomérisation des acides alpha domine — l'ajout amérit ; en deçà, les huiles
+ * aromatiques sont préservées — l'ajout parfume. Ce n'est pas une constante
+ * enfouie : ajustable via {@link BuildDayPlanInput.aromaHopThresholdMin}.
+ * Au seuil exact, l'ajout est classé amérisant (« en deçà » strict).
+ */
+export const DEFAULT_AROMA_HOP_THRESHOLD_MIN = 20;
 
 /** Rampe de chauffe indicative par défaut (min) de l'empâtage, faute de profil. */
 const MASH_DEFAULT_RAMP_MIN = 15;
@@ -170,7 +187,7 @@ const REQUIRED_LAUTER: readonly MeasurementKind[] = ["density", "volume"];
 
 /**
  * Mappe une étape de recette vers une {@link StepSpec} Jour J, ou `null` si le
- * type n'a pas de correspondance sur le brassin (WHIRLPOOL/CONDITION/PACKAGE/…).
+ * type n'a pas de correspondance sur le brassin (CONDITION/PACKAGE/…).
  * Renseigne les compteurs d'ids stables.
  */
 function mapStep(
@@ -280,9 +297,167 @@ function mapStep(
     }
 
     default:
-      // WHIRLPOOL, STABILIZE, CONDITION, PACKAGE, OTHER : hors périmètre Jour J.
+      // STABILIZE, CONDITION, PACKAGE, OTHER : hors périmètre Jour J.
       return null;
   }
+}
+
+/**
+ * Ajout de houblon tel que lu (défensivement) dans `ingredients` du snapshot.
+ * Union discriminée par `use` : le temps restant n'a de sens que pour `BOIL`
+ * (`FIRST_WORT` vaut toute l'ébullition, `WHIRLPOOL` se fait à l'étape whirlpool
+ * — FORMULES §4.3).
+ */
+type RawHopAddition =
+  | {
+      readonly use: "BOIL";
+      readonly name: string;
+      readonly amountG: number;
+      readonly remainingMin: number;
+    }
+  | { readonly use: "FIRST_WORT"; readonly name: string; readonly amountG: number }
+  | { readonly use: "WHIRLPOOL"; readonly name: string; readonly amountG: number };
+
+/**
+ * Extrait les ajouts de houblon du snapshot (M9-04). Lecture défensive : toute
+ * ligne inexploitable (catégorie absente, nom vide, quantité ou temps non
+ * numérique) est **ignorée sans exception**. `DRY_HOP` et les autres moments
+ * d'emploi relèvent des jalons de fermentation (M9-05), pas du Jour J.
+ */
+function extractHopAdditions(snapshot: unknown): readonly RawHopAddition[] {
+  // Invariant d'appel : le plan compte ≥ 1 étape mappée, donc le snapshot est un
+  // objet non nul (cf. {@link extractSteps}) — une re-garde ici serait inatteignable.
+  const ingredients = (snapshot as { ingredients?: unknown }).ingredients;
+  if (!Array.isArray(ingredients)) return [];
+
+  const hops: RawHopAddition[] = [];
+  for (const entry of ingredients) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const rec = entry as Record<string, unknown>;
+    if (rec.category !== "HOP") continue;
+    if (typeof rec.name !== "string" || rec.name.length === 0) continue;
+    const amountG = finiteNumber(rec.amount);
+    if (amountG === undefined) continue;
+
+    const use = rec.use;
+    if (use === "BOIL") {
+      const remainingMin = finiteNumber(rec.timeMinutes);
+      if (remainingMin === undefined) continue; // temps non numérique → ligne ignorée
+      hops.push({ use, name: rec.name, amountG, remainingMin });
+    } else if (use === "FIRST_WORT" || use === "WHIRLPOOL") {
+      hops.push({ use, name: rec.name, amountG });
+    }
+  }
+  return hops;
+}
+
+/** Tri stable et testable : offset croissant, à égalité par nom (comparaison binaire). */
+function byOffsetThenName(a: HopAdditionAlert, b: HopAdditionAlert): number {
+  if (a.offsetFromStartMin !== b.offsetFromStartMin) {
+    return a.offsetFromStartMin - b.offsetFromStartMin;
+  }
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+/**
+ * Attache les échéances de houblonnage aux étapes du plan (M9-04) : ajouts
+ * `BOIL`/`FIRST_WORT` sur l'étape d'ébullition, ajouts `WHIRLPOOL` sur l'étape
+ * whirlpool (M9-03). Sans étape whirlpool au plan, un ajout `WHIRLPOOL` se
+ * **replie** en hors-flamme en fin d'ébullition — l'alerte à l'extinction du feu
+ * vaut mieux qu'un ajout silencieusement perdu.
+ *
+ * Les offsets sont relatifs au **début de l'étape de rattachement**. Appelée
+ * **avant** {@link withSanitizeStep} : la scission de l'ébullition conserve son
+ * début et sa durée totale, les offsets restent donc valides ; les échéances
+ * suivent l'étape `BOIL` principale par recopie (spread).
+ *
+ * Sans étape d'ébullition de **durée connue**, aucun offset n'est calculable :
+ * les ajouts d'ébullition ne sont pas dérivés (on n'invente pas de durée) ;
+ * seuls les ajouts `WHIRLPOOL` rattachés à une étape whirlpool subsistent.
+ */
+function withHopAdditions(
+  steps: readonly StepSpec[],
+  snapshot: unknown,
+  aromaThresholdMin: number,
+): StepSpec[] {
+  const hops = extractHopAdditions(snapshot);
+  const result = [...steps];
+  if (hops.length === 0) return result;
+
+  const boilIndex = result.findIndex((s) => s.phase === "BOIL" && s.plannedHoldMin !== undefined);
+  const boil = boilIndex >= 0 ? result[boilIndex] : undefined;
+  const boilMin = boil?.plannedHoldMin;
+  const whirlpoolIndex = result.findIndex((s) => s.phase === "WHIRLPOOL");
+
+  const boilAdditions: HopAdditionAlert[] = [];
+  const whirlpoolAdditions: HopAdditionAlert[] = [];
+
+  for (const hop of hops) {
+    if (hop.use === "WHIRLPOOL") {
+      if (whirlpoolIndex >= 0) {
+        whirlpoolAdditions.push({
+          name: hop.name,
+          amountG: hop.amountG,
+          nature: "FLAME_OUT",
+          remainingMin: 0,
+          offsetFromStartMin: 0, // au démarrage du whirlpool
+          inconsistent: false,
+        });
+      } else if (boilMin !== undefined) {
+        boilAdditions.push({
+          name: hop.name,
+          amountG: hop.amountG,
+          nature: "FLAME_OUT",
+          remainingMin: 0,
+          offsetFromStartMin: boilMin, // repli : à l'extinction du feu
+          inconsistent: false,
+        });
+      }
+      continue;
+    }
+
+    if (boilMin === undefined) continue;
+
+    if (hop.use === "FIRST_WORT") {
+      // FORMULES §4.3 : le first wort vaut toute l'ébullition → amérisant, dès le début.
+      boilAdditions.push({
+        name: hop.name,
+        amountG: hop.amountG,
+        nature: "BITTERING",
+        remainingMin: boilMin,
+        offsetFromStartMin: 0,
+        inconsistent: false,
+      });
+      continue;
+    }
+
+    const inconsistent = hop.remainingMin > boilMin;
+    boilAdditions.push({
+      name: hop.name,
+      amountG: hop.amountG,
+      nature:
+        hop.remainingMin === 0
+          ? "FLAME_OUT"
+          : hop.remainingMin < aromaThresholdMin
+            ? "AROMA"
+            : "BITTERING",
+      remainingMin: hop.remainingMin,
+      offsetFromStartMin: Math.max(0, boilMin - hop.remainingMin),
+      inconsistent,
+    });
+  }
+
+  if (boil !== undefined && boilAdditions.length > 0) {
+    result[boilIndex] = { ...boil, hopAdditions: boilAdditions.sort(byOffsetThenName) };
+  }
+  const whirlpool = result[whirlpoolIndex];
+  if (whirlpool !== undefined && whirlpoolAdditions.length > 0) {
+    result[whirlpoolIndex] = {
+      ...whirlpool,
+      hopAdditions: whirlpoolAdditions.sort(byOffsetThenName),
+    };
+  }
+  return result;
 }
 
 /**
@@ -294,7 +469,9 @@ function mapStep(
  * ensemencement. Un empâtage multi-paliers produit autant d'étapes `MASH`
  * (`mash-1`, `mash-2`, …). L'étape d'assainissement est **dérivée**, jamais lue
  * du snapshot (cf. {@link withSanitizeStep}) ; le whirlpool n'apparaît que si la
- * recette en déclare un. Le plan est directement consommable par
+ * recette en déclare un. Les étapes d'ébullition et de whirlpool portent les
+ * **échéances de houblonnage** dérivées des ingrédients du snapshot (M9-04,
+ * cf. {@link withHopAdditions}). Le plan est directement consommable par
  * `transition`/`initDayState` (M1-13).
  *
  * @returns le plan dérivé, ou {@link defaultDayPlan} si le snapshot n'expose
@@ -364,6 +541,7 @@ export function buildDayPlan({
   recipeSnapshot,
   equipment,
   coolingCircuitSanitizeLeadMin,
+  aromaHopThresholdMin,
 }: BuildDayPlanInput): DayPlan {
   const counters: PhaseCounters = {};
   const mapped: StepSpec[] = [];
@@ -374,8 +552,14 @@ export function buildDayPlan({
 
   if (mapped.length === 0) return defaultDayPlan();
 
+  const withHops = withHopAdditions(
+    mapped,
+    recipeSnapshot,
+    finiteNumber(aromaHopThresholdMin) ?? DEFAULT_AROMA_HOP_THRESHOLD_MIN,
+  );
+
   return [
     { id: "init", phase: "INITIALIZATION", label: "Initialisation", requiresStabilization: false },
-    ...withSanitizeStep(mapped, coolingCircuitSanitizeLeadMin),
+    ...withSanitizeStep(withHops, coolingCircuitSanitizeLeadMin),
   ];
 }

@@ -80,6 +80,19 @@ export type DayEventInput = z.infer<typeof dayEventSchema>;
 // Plan & état — round-trip de l'instantané persisté en JSONB (M4-03).
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Nature d'un ajout de houblon (miroir de `HopAdditionNature`, M9-04). */
+export const hopAdditionNatureSchema = z.enum(["BITTERING", "AROMA", "FLAME_OUT"]);
+
+/** Échéance d'ajout de houblon d'une étape (miroir de `HopAddition`, M9-04). */
+export const hopAdditionSchema = z.object({
+  name: z.string().min(1),
+  amountG: z.number().nonnegative(),
+  nature: hopAdditionNatureSchema,
+  remainingMin: z.number().nonnegative(),
+  offsetFromStartMin: z.number().nonnegative(),
+  inconsistent: z.boolean(),
+});
+
 /** Spécification d'une étape du plan (miroir de `StepSpec`). */
 export const stepSpecSchema = z.object({
   id: z.string().min(1),
@@ -97,6 +110,12 @@ export const stepSpecSchema = z.object({
    */
   targetTempConstraint: z.enum(["at_most", "at_least"]).optional(),
   requiredMeasurements: z.array(measurementKindSchema).optional(),
+  /**
+   * M9-04 — même impératif de round-trip que `targetTempConstraint` ci-dessus :
+   * absent de ce schéma, les échéances de houblonnage disparaîtraient du plan
+   * persisté au premier rechargement de session.
+   */
+  hopAdditions: z.array(hopAdditionSchema).optional(),
 });
 
 /** Plan du Jour J : suite ordonnée d'étapes (miroir de `DayPlan`). */
