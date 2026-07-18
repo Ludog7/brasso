@@ -75,10 +75,12 @@ export const batchesRoutes: FastifyPluginAsync<BatchesRoutesOptions> = async (ap
     return { measures: await service.listMeasures(id, type) };
   });
 
+  // `changed: false` = le batch portait déjà ce statut (rejeu de la file offline) :
+  // réponse 200 sans effet rejoué, plutôt qu'une fausse erreur (M9-07).
   app.post("/batches/:id/status", { config: app.rbac("recettes", "update") }, async (request) => {
     const { id } = idParams.parse(request.params);
     const { status } = statusChangeBody.parse(request.body);
-    return { batch: await service.changeStatus(id, status, request.user?.id ?? null) };
+    return await service.changeStatus(id, status, request.user?.id ?? null);
   });
 
   // Coût de revient **estimé** (coûts de référence catalogue, hors coût lot réel) :

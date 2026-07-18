@@ -653,22 +653,38 @@ describe("transitions de statut jusqu'à TERMINE (M9-07 §C)", () => {
     expect((await setStatus("EN_BRASSAGE")).statusCode).toBe(409);
   });
 
-  it("rejouer la même transition est refusé — donc sans double effet", async () => {
-    await setStatus("EN_FERMENTATION");
-    const replay = await setStatus("EN_FERMENTATION");
-    expect(replay.statusCode).toBe(409);
-    // Le statut n'a pas bougé : le rejeu n'a rien consommé deux fois.
-    const list = await inject(app, "GET", "/api/batches/batch_1/milestones", {
-      cookie: cookieFor("brasseur"),
+  describe("rejeu de la file offline (ADR-08) : idempotent, sans effet rejoué", () => {
+    it("redemander le statut courant réussit sans rien réappliquer", async () => {
+      const first = await setStatus("EN_FERMENTATION");
+      expect(first.json().changed).toBe(true);
+      const fermentedAt = first.json().batch.fermentedAt;
+
+      const replay = await setStatus("EN_FERMENTATION");
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json().changed).toBe(false);
+      // L'horodatage du jalon n'est pas réécrit : c'est bien un constat, pas
+      // une seconde application (et les réservations ne sont pas reconsommées).
+      expect(replay.json().batch.fermentedAt).toBe(fermentedAt);
     });
-    expect(list.statusCode).toBe(200);
+
+    it("le rejeu n'ouvre pas la voie à un saut : la suite reste contrôlée", async () => {
+      await setStatus("EN_FERMENTATION");
+      await setStatus("EN_FERMENTATION");
+      // Toujours impossible de sauter le conditionnement.
+      expect((await setStatus("TERMINE")).statusCode).toBe(409);
+    });
   });
 
-  it("un brassin ANNULE n'accepte plus aucune transition", async () => {
+  it("un brassin ANNULE ne repart jamais", async () => {
     batches.seed(batchFixture({ id: "batch_2", status: "ANNULE" }));
-    for (const target of ["EN_FERMENTATION", "EN_CONDITIONNEMENT", "TERMINE", "ANNULE"]) {
+    for (const target of ["EN_FERMENTATION", "EN_CONDITIONNEMENT", "TERMINE"]) {
       expect((await setStatus(target, "brasseur", "batch_2")).statusCode).toBe(409);
     }
+    // Le redemander annulé est un constat, pas une relance : accepté sans effet.
+    const replay = await setStatus("ANNULE", "brasseur", "batch_2");
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().changed).toBe(false);
+    expect(replay.json().batch.status).toBe("ANNULE");
   });
 });
 
