@@ -49,6 +49,22 @@ export function measurementsForStep(state: DayState, stepId: string): readonly M
   return state.measurements.filter((m) => m.stepId === stepId);
 }
 
+/**
+ * Libellés des types de mesure dans les **motifs de blocage** (#266). Ces
+ * motifs sont rédigés pour l'affichage (cf. {@link StepValidationCheck}) : y
+ * recopier les identifiants internes (`density`, `volume`) donnait une phrase
+ * française parsemée d'anglais sur l'écran d'atelier.
+ *
+ * Distinct des libellés d'`apps/web` (capitalisés, employés en titre de liste) :
+ * ceux-ci s'insèrent en milieu de phrase.
+ */
+const MEASUREMENT_KIND_LABELS: Record<MeasurementKind, string> = {
+  density: "densité",
+  volume: "volume",
+  temperature: "température",
+  ph: "pH",
+};
+
 /** Kinds de mesures requises encore manquantes pour l'étape courante. */
 function missingMeasurements(state: DayState, step: StepSpec): readonly MeasurementKind[] {
   const required = step.requiredMeasurements ?? [];
@@ -109,7 +125,9 @@ export function stepValidationCheck(state: DayState, at: number): StepValidation
 
   const missing = missingMeasurements(state, step);
   if (missing.length > 0) {
-    blockedBy.push(`Mesures requises manquantes : ${missing.join(", ")}.`);
+    blockedBy.push(
+      `Mesures requises manquantes : ${missing.map((k) => MEASUREMENT_KIND_LABELS[k]).join(", ")}.`,
+    );
   }
 
   // Contrainte de température cible (M9-03) : n'est évaluée que si une mesure
