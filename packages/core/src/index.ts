@@ -71,3 +71,6 @@ export * from "./hub/index.js";
 
 // Calculateurs d'atelier autonomes — starter, eau, dilution, BIAB (M8-01, FORMULES §6/§9.3/§12).
 export * from "./calculators/index.js";
+
+// Cycle post-ensemencement — jalons datés fermentation/dry hop/cold crash/garde (M9-05, FORMULES §13.1).
+export * from "./batchCycle/index.js";
