@@ -43,6 +43,14 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    // Budget de poids tablette (M8-07). Après le code-splitting par route (App.tsx),
+    // le plus gros chunk est l'entrée (vendor React + router + query + shell ≈ 252 kB
+    // brut / ~81 kB gzip) ; les pages et le chunk de schémas partagé sont tirés à la
+    // demande. On plafonne à 300 kB pour qu'une régression de poids (p. ex. un retour
+    // à un bundle monolithique ~680 kB) redéclenche l'avertissement Vite.
+    chunkSizeWarningLimit: 300,
+  },
   server: {
     port: 5173,
     // Même origine côté navigateur → pas de CORS, cookie de session conservé.

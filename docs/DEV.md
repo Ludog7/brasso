@@ -6,6 +6,8 @@
 > - `CLAUDE.md` → les **règles** non négociables (ADR, conventions, wording).
 > - `docs/SPEC-ORCHESTRATION.md` → cadrage, ADR détaillés, milestones.
 > - `docs/SPEC-FONCTIONNELLE.md` / `docs/FORMULES-BRASSICOLES.md` → le métier.
+> - `docs/RUNBOOKS.md` → l'**exploitation en production** (installation from scratch,
+>   restauration, rotation des secrets, migrations, incidents, RGPD).
 > - Les mémoires `brasso-avancement-M*` → l'**état d'avancement** courant.
 >
 > But : réduire le « coût d'orientation » (commandes, carte, config) à chaque
@@ -28,7 +30,7 @@
 | DB | **Prisma 6** + **PostgreSQL 16** | `packages/db` |
 | Web | **React 18** + **Vite 5** + **Tailwind 4** + shadcn/ui, **TanStack Query 5**, **Zustand 5**, react-router 6, `vite-plugin-pwa` | `apps/web` |
 | Core | TS pur (zéro dep UI/DB), Zod, `fast-xml-parser` (BeerXML) | `packages/core` |
-| Tests | **Vitest** partout. E2E Playwright : **prévu** (spec §1), pas encore câblé. | |
+| Tests | **Vitest** partout (unitaire/intégration). **E2E Playwright** câblé dans `e2e/` (parcours critiques, M8-05+). | `apps/*/tests`, `e2e/` |
 | Infra | Docker Compose (app + postgres + caddy), Caddy (TLS auto) | `docker-compose*.yml`, `Caddyfile` |
 
 Détail complet : `SPEC-ORCHESTRATION.md` §1.
@@ -75,6 +77,7 @@ le seed lisent la racine via `--env-file=../../.env`.
 | **Core + couverture** | `pnpm --filter @brasso/core test:coverage` |
 | API en watch | `pnpm --filter @brasso/api dev` |
 | Web en watch | `pnpm --filter @brasso/web dev` |
+| **E2E (Playwright)** | `pnpm test:e2e` (base de test **isolée** ; setup + prérequis : `e2e/README.md`) |
 | Format (avant push) | `pnpm format` (écrit) · `pnpm format:check` (CI) |
 | Prisma | `db:migrate` (dev) · `db:deploy` (prod) · `db:seed` · `db:reset` · `db:studio` · `db:generate` |
 
@@ -89,6 +92,7 @@ l'ordre** (reproductibles en local pour éviter un aller-retour) :
 4. `pnpm typecheck` ← `tsc --noEmit`
 5. `pnpm test` ← Vitest. **Gate couverture `core` ≥ 90 %** (lines/branches/functions/statements) via `packages/core/vitest.config.ts`
 6. `pnpm build`
+7. `pnpm test:e2e` ← **Playwright** (M8-05) : install chromium puis parcours critiques contre l'app réelle (front + API + Postgres). Intégré au check `ci` → **bloquant** ; artefacts (trace/vidéo/rapport) uploadés à l'échec.
 
 `main` est protégée : merge par PR uniquement, **CI verte**, **squash** only.
 
@@ -128,4 +132,19 @@ l'ordre** (reproductibles en local pour éviter un aller-retour) :
   `transition(state, event)` **pur, serveur autoritaire** (ADR-08) →
   `phaseToDayPhase` pour la persistance (`DayPhase` Prisma).
 - **RBAC deny-by-default** : matrice (ressource, action) dans `apps/api/src/rbac/matrix.ts`.
+- **Front perf & PWA offline (M8-07)** : les pages sont **chargées à la demande**
+  (`App.tsx` = `React.lazy` + `<Suspense>`, un chunk par route). Le bundle initial
+  se limite au socle (vendor React + router + query + shell ≈ **252 kB / ~81 kB
+  gzip** — avant split : un seul chunk **679 kB**). **Budget** = `build.chunkSizeWarningLimit:
+  300` dans `apps/web/vite.config.ts` : une régression de poids (retour à un bundle
+  monolithique) redéclenche l'avertissement Vite. **Offline (ADR-08)** : `vite-plugin-pwa`
+  (workbox `generateSW`) précache **tous** les chunks émis (`globPatterns` `**/*.js`,
+  y compris `DayScreen-*.js`) et pose `navigateFallback: index.html` → un rechargement
+  hors ligne sur une route profonde sert le shell depuis le cache, puis l'`import()`
+  du chunk de route résout depuis le précache. La **file d'actions offline** du Jour J
+  (M4-14, IndexedDB) rejoue à la reconnexion.
+  **Vérifier l'offline** : `pnpm --filter @brasso/web build && pnpm --filter @brasso/web preview`,
+  ouvrir le Jour J d'un batch (SW installé), passer l'onglet **hors ligne**
+  (DevTools › Network › Offline), **recharger** (le shell revient), dérouler une
+  étape (l'action est mise en file), repasser **en ligne** → resynchronisation.
 ```
