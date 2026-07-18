@@ -687,7 +687,121 @@ export interface BatchCost {
   basis: CostBasis;
 }
 
+/** Jalon du cycle post-ensemencement (miroir Prisma `BatchMilestoneKind`, M9). */
+export type BatchMilestoneKind = "FERMENTATION" | "DRY_HOP" | "COLD_CRASH" | "GARDE";
+
+/** D'où vient l'étape courante : session Jour J en cours, ou jalon du cycle. */
+export type CurrentStepSource = "DAY" | "MILESTONE";
+
+/**
+ * Échéance datée (M9-09). `at` est l'instant, `date` la **date calendaire** dans
+ * le fuseau de l'instance : c'est celle-ci qu'on affiche. Tronquer `at` donnerait
+ * la veille pour une échéance à minuit — le piège identifié en M9-07.
+ */
+export interface BatchDeadline {
+  code: string;
+  at: string;
+  date: string;
+}
+
+/** Un brassin dans la vue « Brassins » (miroir de `BatchOverview`, M9-09). */
+export interface BatchOverview {
+  id: string;
+  batchNumber: number;
+  recipeName: string;
+  engine: RecipeEngine | null;
+  status: BatchStatus;
+  plannedAt: string | null;
+  brewedAt: string | null;
+  completedAt: string | null;
+  currentStep: { source: CurrentStepSource; code: string } | null;
+  nextDeadline: BatchDeadline | null;
+  plannedEndAt: string | null;
+  plannedEndDate: string | null;
+}
+
+/** Page de la vue « Brassins ». */
+export interface BatchOverviewPage {
+  items: BatchOverview[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Filtres de la vue « Brassins » — alignés sur les paramètres de la route. */
+export interface BatchOverviewFilters {
+  status?: BatchStatus[];
+  recipeId?: string;
+  from?: string;
+  to?: string;
+  scope?: "ongoing" | "finished" | "all";
+  limit?: number;
+  offset?: number;
+}
+
+/** Jalon daté d'un brassin (miroir de `MilestoneApiView`, M9-07). */
+export interface BatchMilestone {
+  id: string;
+  kind: BatchMilestoneKind;
+  plannedDurationDays: number;
+  plannedStartAt: string;
+  plannedEndAt: string;
+  plannedStartDate: string;
+  plannedEndDate: string;
+  actualStartAt: string | null;
+  actualEndAt: string | null;
+  actualStartDate: string | null;
+  actualEndDate: string | null;
+  completed: boolean;
+  sortOrder: number;
+}
+
+/** Un maillon de la chaîne des volumes (M9-06). */
+export interface VolumeStep {
+  volumeL: number | null;
+  source: "measured" | "estimated" | "unknown";
+}
+
+/** Synthèse des volumes d'un brassin (miroir de `BatchVolumesView`, M9-07). */
+export interface BatchVolumes {
+  preBoil: VolumeStep;
+  postBoil: VolumeStep;
+  transferred: VolumeStep;
+  pitched: VolumeStep;
+  packaged: VolumeStep;
+  evaporationL: number | null;
+  packagingYieldPercent: number | null;
+  warnings: string[];
+}
+
 export const batchesApi = {
+  /**
+   * Vue « Brassins » enrichie (M9-09) : étape courante et prochaine échéance en
+   * **un seul appel**, pour que la liste n'interroge pas une route par ligne.
+   */
+  overview: (filters: BatchOverviewFilters = {}): Promise<BatchOverviewPage> => {
+    const qs = new URLSearchParams();
+    for (const status of filters.status ?? []) qs.append("status", status);
+    if (filters.recipeId) qs.set("recipeId", filters.recipeId);
+    if (filters.from) qs.set("from", filters.from);
+    if (filters.to) qs.set("to", filters.to);
+    if (filters.scope && filters.scope !== "all") qs.set("scope", filters.scope);
+    if (filters.limit !== undefined) qs.set("limit", String(filters.limit));
+    if (filters.offset !== undefined) qs.set("offset", String(filters.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<BatchOverviewPage>(`/api/batches/overview${suffix}`);
+  },
+
+  /** Jalons datés du cycle post-ensemencement (M9-07). */
+  milestones: (id: string): Promise<BatchMilestone[]> =>
+    request<{ milestones: BatchMilestone[] }>(`/api/batches/${id}/milestones`).then(
+      (r) => r.milestones,
+    ),
+
+  /** Chaîne des volumes et rendement de conditionnement (M9-06/07). */
+  volumes: (id: string): Promise<BatchVolumes> =>
+    request<{ volumes: BatchVolumes }>(`/api/batches/${id}/volumes`).then((r) => r.volumes),
+
   get: (id: string): Promise<BatchDetail> =>
     request<{ batch: BatchDetail }>(`/api/batches/${id}`).then((r) => r.batch),
 

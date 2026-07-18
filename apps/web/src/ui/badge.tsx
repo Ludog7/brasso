@@ -10,6 +10,8 @@ const badgeVariants = cva("inline-flex items-center rounded-md px-2.5 py-0.5 tex
       accent: "bg-primary/15 text-foreground",
       success: "bg-emerald-500/15 text-emerald-300",
       warning: "bg-amber-500/15 text-amber-300",
+      // Signale ce qui appelle une action immédiate (échéance dépassée, M9-10).
+      destructive: "bg-destructive/15 text-destructive-foreground",
       muted: "border border-border text-muted-foreground",
     },
   },
