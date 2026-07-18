@@ -11,10 +11,18 @@
  * celles de l'opérateur.
  */
 
-import type { ContainerSpec, PackagingSplit } from "@brasso/core";
-import { packagedVolumeFromLines, splitIntoContainers } from "@brasso/core";
+import type { CarbonationCheck, ContainerSpec, PackagingSplit } from "@brasso/core";
+import {
+  calendarDateInZone,
+  checkCarbonation,
+  packagedVolumeFromLines,
+  saleAvailability,
+  splitIntoContainers,
+  targetCarbonationPressureBar,
+} from "@brasso/core";
 
 import type {
+  ConditioningMethod,
   PackagingCorrectionData,
   PackagingLineView,
   PackagingMovementView,
@@ -23,6 +31,8 @@ import type {
 } from "./packaging.repository.js";
 import type { BatchRepository } from "./repository.js";
 import type {
+  CarbonationReadingBody,
+  CarbonationTargetQuery,
   PackagingCorrectionBody,
   PackagingRecordBody,
   PackagingSplitQuery,
@@ -44,6 +54,32 @@ export class BatchNotPackageableError extends Error {
   }
 }
 
+/** Ligne de conditionnement introuvable sur ce brassin → 404. */
+export class PackagingLineNotFoundError extends Error {
+  readonly statusCode = 404;
+  readonly code = "PACKAGING_LINE_NOT_FOUND";
+  constructor(batchId: string, lineId: string) {
+    super(`Le brassin ${batchId} ne comporte pas de ligne de conditionnement ${lineId}`);
+    this.name = "PackagingLineNotFoundError";
+  }
+}
+
+/**
+ * Relevé de pression refusé : la ligne n'est pas en carbonatation forcée → 409.
+ * Une bouteille se carbonate par refermentation, il n'y a pas de détendeur à
+ * relever.
+ */
+export class NotForcedCarbonationError extends Error {
+  readonly statusCode = 409;
+  readonly code = "NOT_FORCED_CARBONATION";
+  constructor(lineId: string, method: string) {
+    super(
+      `La ligne ${lineId} est en mise en condition « ${method} » : un relevé de pression ne s'applique qu'à une carbonatation forcée`,
+    );
+    this.name = "NotForcedCarbonationError";
+  }
+}
+
 /** Correction refusée : le brassin n'a aucun produit fini à corriger → 409. */
 export class NothingToCorrectError extends Error {
   readonly statusCode = 409;
@@ -61,6 +97,40 @@ export interface PackagingRecordResult extends PackagingResult {
   /** Statut du brassin après enregistrement (`TERMINE`). */
   batchStatus: string;
 }
+
+/**
+ * Verdict d'un relevé de carbonatation (M9-15). ADR-11 : `onTarget` dit que la
+ * mesure **atteint la cible**, ce qui est une aide à la décision — jamais une
+ * attestation de conformité du produit.
+ */
+export interface CarbonationReadingResult extends CarbonationCheck {
+  line: PackagingLineView;
+  /** Date estimée de mise en vente (`YYYY-MM-DD`), `null` si la cible n'est pas atteinte. */
+  availableForSaleDate: string | null;
+  /** Ce qu'il reste à faire, à afficher tel quel ; `null` si une date existe. */
+  pendingReason: string | null;
+}
+
+/**
+ * Ligne de conditionnement exposée par l'API : l'instant **et** la date
+ * calendaire de mise en vente, dans le fuseau de l'instance.
+ *
+ * Les deux, pour la même raison qu'en M9-07 : une disponibilité à minuit heure
+ * de Paris se sérialise `…T22:00:00Z` la veille, et un consommateur qui tronque
+ * l'ISO annoncerait la bière vendable un jour trop tôt.
+ */
+export interface PackagingLineApiView extends PackagingLineView {
+  /** Date calendaire de mise en vente (`YYYY-MM-DD`), `null` si non estimée. */
+  availableForSaleDate: string | null;
+}
+
+const toLineApiView = (line: PackagingLineView, timezone: string): PackagingLineApiView => ({
+  ...line,
+  availableForSaleDate:
+    line.availableForSaleAt === null
+      ? null
+      : calendarDateInZone(line.availableForSaleAt.getTime(), timezone),
+});
 
 /**
  * Statuts depuis lesquels un conditionnement est recevable. `EN_FERMENTATION`
@@ -91,9 +161,13 @@ export class BatchPackagingService {
   }
 
   /** Conditionnements déjà enregistrés (404 si le brassin n'existe pas). */
-  async list(batchId: string): Promise<PackagingLineView[]> {
+  async list(batchId: string): Promise<PackagingLineApiView[]> {
     await this.requireBatch(batchId);
-    return this.packaging.listPackaging(batchId);
+    const [lines, settings] = await Promise.all([
+      this.packaging.listPackaging(batchId),
+      this.packaging.conditioningSettings(),
+    ]);
+    return lines.map((line) => toLineApiView(line, settings.timezone));
   }
 
   /**
@@ -118,14 +192,34 @@ export class BatchPackagingService {
     // se relève pas en vrac, sans quoi les deux chiffres divergeraient.
     const packagedVolumeL = packagedVolumeFromLines(body.lines) ?? 0;
 
+    // Mise en condition (M9-15) : une refermentation démarre dès la mise en
+    // bouteille, donc sa date de vente est connue tout de suite. Une
+    // carbonatation forcée attend le relevé de pression — on ne promet pas une
+    // bière prête alors que le fût peut être resté plat.
+    const settings = await this.packaging.conditioningSettings();
+    const packagedAt = Date.now();
+
     const result = await this.packaging.recordPackaging(
       batchId,
       {
-        lines: body.lines.map((l) => ({
-          containerItemId: l.containerItemId ?? null,
-          containerVolumeL: l.containerVolumeL,
-          quantity: l.quantity,
-        })),
+        lines: body.lines.map((l) => {
+          const method: ConditioningMethod = l.conditioningMethod ?? "NONE";
+          const availability = saleAvailability({
+            method,
+            packagedAt,
+            delays: settings,
+            timezone: settings.timezone,
+          });
+          return {
+            containerItemId: l.containerItemId ?? null,
+            containerVolumeL: l.containerVolumeL,
+            quantity: l.quantity,
+            conditioningMethod: method,
+            co2TargetVolumes: l.co2TargetVolumes ?? null,
+            availableForSaleAt:
+              availability.availableAt === null ? null : new Date(availability.availableAt),
+          };
+        }),
         packagedVolumeL,
         productName: body.productName ?? defaultProductName(batch.batchNumber),
         note: body.note ?? null,
@@ -139,6 +233,82 @@ export class BatchPackagingService {
     const batchStatus = await this.completeBatch(batchId, batch.status, userId);
 
     return { ...result, packagedVolumeL, batchStatus };
+  }
+
+  /**
+   * Pression à régler au détendeur (bar) pour un CO₂ visé à une température —
+   * aide au réglage, avant tout relevé. N'écrit rien (FORMULES §8.2).
+   */
+  async targetPressure(query: CarbonationTargetQuery): Promise<{
+    targetBar: number;
+    toleranceBar: number;
+  }> {
+    const { carbonationToleranceBar } = await this.packaging.conditioningSettings();
+    return {
+      targetBar: targetCarbonationPressureBar(
+        query.co2TargetVolumes,
+        query.tempC,
+        query.altitudeFt ?? 0,
+      ),
+      toleranceBar: carbonationToleranceBar,
+    };
+  }
+
+  /**
+   * Enregistre un relevé de carbonatation forcée sur une ligne de fûts.
+   *
+   * La cible est **recalculée à la température relevée** : une bière plus chaude
+   * demande davantage de pression pour le même CO₂ dissous, et juger contre la
+   * cible d'une autre température validerait une bière plate.
+   *
+   * Un relevé qui n'atteint pas la cible est **conservé et signalé**, sans fixer
+   * de date de mise en vente : c'est un constat qui permet de réajuster le
+   * détendeur et de relever à nouveau, pas un échec à effacer.
+   */
+  async recordCarbonationReading(
+    batchId: string,
+    lineId: string,
+    body: CarbonationReadingBody,
+  ): Promise<CarbonationReadingResult> {
+    await this.requireBatch(batchId);
+    const line = await this.packaging.findLine(batchId, lineId);
+    if (!line) throw new PackagingLineNotFoundError(batchId, lineId);
+    if (line.conditioningMethod !== "FORCED_CARBONATION") {
+      throw new NotForcedCarbonationError(lineId, line.conditioningMethod);
+    }
+
+    const settings = await this.packaging.conditioningSettings();
+    const check = checkCarbonation(
+      line.co2TargetVolumes ?? 0,
+      body.pressureBar,
+      body.tempC,
+      settings.carbonationToleranceBar,
+      body.altitudeFt ?? 0,
+    );
+
+    const validatedAt = check.onTarget ? new Date() : null;
+    const availability = saleAvailability({
+      method: "FORCED_CARBONATION",
+      packagedAt: line.packagedAt.getTime(),
+      carbonationValidatedAt: validatedAt?.getTime() ?? null,
+      delays: settings,
+      timezone: settings.timezone,
+    });
+
+    const updated = await this.packaging.recordCarbonationReading(batchId, lineId, {
+      measuredPressureBar: body.pressureBar,
+      measuredTempC: body.tempC,
+      carbonationValidatedAt: validatedAt,
+      availableForSaleAt:
+        availability.availableAt === null ? null : new Date(availability.availableAt),
+    });
+
+    return {
+      ...check,
+      line: updated,
+      availableForSaleDate: availability.availableDate,
+      pendingReason: availability.pendingReason,
+    };
   }
 
   /**

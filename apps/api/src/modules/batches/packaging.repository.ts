@@ -19,6 +19,9 @@
 
 import type { PrismaClient } from "@brasso/db";
 
+/** Mise en condition d'une ligne (miroir de l'enum Prisma `ConditioningMethod`). */
+export type ConditioningMethod = "NONE" | "REFERMENTATION" | "FORCED_CARBONATION";
+
 /** Ligne de conditionnement saisie par l'opérateur. */
 export interface PackagingLineInput {
   /** Article `CONDITIONNEMENT` consommé (bouteille, fût…) ; `null` si non suivi. */
@@ -26,6 +29,22 @@ export interface PackagingLineInput {
   /** Volume **réellement rempli** par contenant (L). */
   containerVolumeL: number;
   quantity: number;
+  /** Mise en condition avant vente (M9-15). */
+  conditioningMethod: ConditioningMethod;
+  /** CO₂ visé (volumes) — carbonatation forcée uniquement. */
+  co2TargetVolumes: number | null;
+  /** Date estimée de mise en vente, déjà calculée par `core`. */
+  availableForSaleAt: Date | null;
+}
+
+/** Relevé de carbonatation à enregistrer sur une ligne (M9-15). */
+export interface CarbonationReadingData {
+  measuredPressureBar: number;
+  measuredTempC: number;
+  /** Instant du relevé jugé atteignant la cible ; `null` s'il ne l'atteint pas. */
+  carbonationValidatedAt: Date | null;
+  /** Date de mise en vente, calculée par `core` ; `null` tant que la cible n'est pas atteinte. */
+  availableForSaleAt: Date | null;
 }
 
 /** Données d'un conditionnement à enregistrer (le service a validé). */
@@ -45,6 +64,12 @@ export interface PackagingLineView {
   containerItemId: string | null;
   containerVolumeL: number;
   quantity: number;
+  conditioningMethod: ConditioningMethod;
+  co2TargetVolumes: number | null;
+  measuredPressureBar: number | null;
+  measuredTempC: number | null;
+  carbonationValidatedAt: Date | null;
+  availableForSaleAt: Date | null;
   packagedAt: Date;
   note: string | null;
 }
@@ -97,6 +122,29 @@ export interface PackagingRepository {
   ): Promise<PackagingMovementView>;
   /** Article `PRODUIT_FINI` du brassin, `null` s'il n'a pas encore été conditionné. */
   findProductItem(batchId: string): Promise<{ id: string; name: string } | null>;
+  /** Une ligne de conditionnement précise, `null` si absente de ce brassin. */
+  findLine(batchId: string, lineId: string): Promise<PackagingLineView | null>;
+  /**
+   * Enregistre un relevé de carbonatation sur une ligne (M9-15). Le relevé est
+   * conservé **même s'il n'atteint pas la cible** : c'est un constat utile pour
+   * réajuster, pas un échec à effacer.
+   */
+  recordCarbonationReading(
+    batchId: string,
+    lineId: string,
+    data: CarbonationReadingData,
+  ): Promise<PackagingLineView>;
+  /** Délais et tolérance de mise en condition (`Settings`, ADR-01). */
+  conditioningSettings(): Promise<ConditioningSettings>;
+}
+
+/** Paramètres de mise en condition lus des `Settings` (M9-15). */
+export interface ConditioningSettings {
+  timezone: string;
+  refermentationDays: number;
+  forcedCarbonationDays: number;
+  /** Tolérance de pression (bar), convertie depuis les millibars stockés. */
+  carbonationToleranceBar: number;
 }
 
 const LINE_SELECT = {
@@ -105,6 +153,12 @@ const LINE_SELECT = {
   containerItemId: true,
   containerVolumeL: true,
   quantity: true,
+  conditioningMethod: true,
+  co2TargetVolumes: true,
+  measuredPressureBar: true,
+  measuredTempC: true,
+  carbonationValidatedAt: true,
+  availableForSaleAt: true,
   packagedAt: true,
   note: true,
 } as const;
@@ -178,6 +232,9 @@ export class PrismaPackagingRepository implements PackagingRepository {
             containerItemId: line.containerItemId,
             containerVolumeL: line.containerVolumeL,
             quantity: line.quantity,
+            conditioningMethod: line.conditioningMethod,
+            co2TargetVolumes: line.co2TargetVolumes,
+            availableForSaleAt: line.availableForSaleAt,
             packagedById: userId,
             note: data.note,
           },
@@ -225,6 +282,52 @@ export class PrismaPackagingRepository implements PackagingRepository {
 
       return { productItemId: product.id, lines, movements };
     });
+  }
+
+  findLine(batchId: string, lineId: string): Promise<PackagingLineView | null> {
+    return this.db.batchPackaging.findFirst({
+      where: { id: lineId, batchId },
+      select: LINE_SELECT,
+    });
+  }
+
+  recordCarbonationReading(
+    _batchId: string,
+    lineId: string,
+    data: CarbonationReadingData,
+  ): Promise<PackagingLineView> {
+    // Le service a déjà vérifié que la ligne appartient bien au brassin
+    // (`findLine`), l'identifiant de ligne suffit donc ici.
+    return this.db.batchPackaging.update({
+      where: { id: lineId },
+      data: {
+        measuredPressureBar: data.measuredPressureBar,
+        measuredTempC: data.measuredTempC,
+        carbonationValidatedAt: data.carbonationValidatedAt,
+        availableForSaleAt: data.availableForSaleAt,
+      },
+      select: LINE_SELECT,
+    });
+  }
+
+  async conditioningSettings(): Promise<ConditioningSettings> {
+    const settings = await this.db.settings.findFirst({
+      select: {
+        timezone: true,
+        refermentationDays: true,
+        forcedCarbonationDays: true,
+        carbonationToleranceMbar: true,
+      },
+    });
+    // Mêmes valeurs que les `@default` du schéma : une instance sans ligne
+    // `Settings` reste exploitable plutôt que de bloquer un conditionnement.
+    return {
+      timezone: settings?.timezone ?? "Europe/Paris",
+      refermentationDays: settings?.refermentationDays ?? 21,
+      forcedCarbonationDays: settings?.forcedCarbonationDays ?? 7,
+      // Stockée en millibar entier, exposée en bar (unité interne).
+      carbonationToleranceBar: (settings?.carbonationToleranceMbar ?? 200) / 1000,
+    };
   }
 
   async recordCorrection(

@@ -8,6 +8,7 @@ import {
   batchMeasureSchema,
   batchMilestoneKindSchema,
   batchStatusSchema,
+  conditioningMethodSchema,
   cycleDurationDaysSchema,
   measureTypeSchema,
   packagingLineSchema,
@@ -99,6 +100,14 @@ export type MilestonePatchBody = z.infer<typeof milestonePatchBody>;
  */
 const packagingLineBody = packagingLineSchema.extend({
   containerItemId: z.string().min(1).optional(),
+  /**
+   * Mise en condition de **cette ligne** (M9-15) : refermentation en bouteille
+   * (la case à cocher côté écran) ou carbonatation forcée au fût. Par contenant
+   * et non par brassin — fûts et bouteilles ne sont pas prêts en même temps.
+   */
+  conditioningMethod: conditioningMethodSchema.optional(),
+  /** CO₂ visé (volumes, FORMULES §8.3) — requis pour une carbonatation forcée. */
+  co2TargetVolumes: z.number().positive().optional(),
 });
 
 /** Corps d'un conditionnement : au moins une ligne de contenants. */
@@ -109,6 +118,30 @@ export const packagingRecordBody = z.object({
   note: z.string().min(1).optional(),
 });
 export type PackagingRecordBody = z.infer<typeof packagingRecordBody>;
+
+/**
+ * Relevé de carbonatation forcée (`POST /api/batches/:id/packaging/:lineId/carbonation`,
+ * M9-15) : pression au détendeur en **bar** (unité interne) et température de la
+ * bière. La conformité se juge contre la cible recalculée à cette température.
+ */
+export const carbonationReadingBody = z.object({
+  pressureBar: z.number().nonnegative(),
+  tempC: z.number().finite(),
+  /** Altitude du site (ft) — corrige la pression cible (FORMULES §8.2). */
+  altitudeFt: z.number().finite().optional(),
+});
+export type CarbonationReadingBody = z.infer<typeof carbonationReadingBody>;
+
+/**
+ * Aperçu de la pression à régler (`POST /api/batches/:id/packaging:pressure`) :
+ * aide au réglage du détendeur avant tout relevé. N'écrit rien.
+ */
+export const carbonationTargetQuery = z.object({
+  co2TargetVolumes: z.number().positive(),
+  tempC: z.number().finite(),
+  altitudeFt: z.number().finite().optional(),
+});
+export type CarbonationTargetQuery = z.infer<typeof carbonationTargetQuery>;
 
 /**
  * Correction d'un conditionnement (`POST /api/batches/:id/packaging/corrections`).

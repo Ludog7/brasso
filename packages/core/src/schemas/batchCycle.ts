@@ -70,6 +70,12 @@ export const packagingLineSchema = z.object({
   quantity: z.number().int().nonnegative(),
 });
 
+/**
+ * Mise en condition d'une ligne de conditionnement (miroir de l'enum Prisma
+ * `ConditioningMethod`, M9-15) — une bière tout juste conditionnée est plate.
+ */
+export const conditioningMethodSchema = z.enum(["NONE", "REFERMENTATION", "FORCED_CARBONATION"]);
+
 export type PackagingLineInput = z.infer<typeof packagingLineSchema>;
 export type CycleDurationsInput = z.infer<typeof cycleDurationsSchema>;
 export type BuildBatchMilestonesInputParsed = z.infer<typeof buildBatchMilestonesInputSchema>;

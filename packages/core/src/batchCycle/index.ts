@@ -5,6 +5,7 @@
  */
 
 export * from "./calendar.js";
+export * from "./conditioning.js";
 export * from "./milestones.js";
 export * from "./packaging.js";
 export * from "./volumes.js";
