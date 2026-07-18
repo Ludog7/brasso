@@ -24,8 +24,10 @@ import type {
   BatchCreateData,
   BatchDetailView,
   BatchListFilters,
+  BatchOverviewRow,
   BatchRepository,
   BatchSummaryView,
+  BrewedVolumeSummary,
   MeasureCreateData,
   MeasureView,
   ReservationInput,
@@ -131,6 +133,16 @@ class StubBatchRepository implements BatchRepository {
   }
   getCostInputs(_id: string): Promise<BatchCostInputs | null> {
     return Promise.resolve(null);
+  }
+  // Vue « Brassins » (M9-09) : couverte par `batches-overview.test.ts`.
+  listOverview(): Promise<BatchOverviewRow[]> {
+    return Promise.resolve([]);
+  }
+  brewedVolume(): Promise<BrewedVolumeSummary> {
+    return Promise.resolve({ totalL: 0, batches: 0 });
+  }
+  timezone(): Promise<string> {
+    return Promise.resolve("Europe/Paris");
   }
 }
 

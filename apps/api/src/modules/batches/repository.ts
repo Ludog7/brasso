@@ -73,6 +73,43 @@ export interface BatchListFilters {
   recipeId?: string;
 }
 
+/** Filtres de la vue « Brassins » enrichie (M9-09). */
+export interface BatchOverviewFilters {
+  /** Statuts retenus ; vide = tous. */
+  statuses?: BatchStatus[];
+  recipeId?: string;
+  /** Période sur les dates clés du brassin (planifié / brassé). */
+  from?: Date;
+  to?: Date;
+}
+
+/**
+ * Ligne brute de la vue « Brassins » : le brassin, son état du jour et ses
+ * jalons, chargés en **requêtes groupées** (jamais une par brassin — le N+1
+ * ferait ramer la tablette dès quelques dizaines de brassins).
+ */
+export interface BatchOverviewRow extends BatchSummaryView {
+  /** Snapshot figé — le nom de recette s'y lit **défensivement** côté service. */
+  recipeSnapshot: unknown;
+  /** Phase Jour J courante (`BatchDayState.phase`), `null` hors session. */
+  dayPhase: string | null;
+  /** Jalons du cycle, ordonnés ; vides tant que l'ensemencement n'a pas eu lieu. */
+  milestones: {
+    kind: string;
+    plannedEndAt: Date;
+    actualEndAt: Date | null;
+    sortOrder: number;
+  }[];
+}
+
+/** Volume brassé agrégé sur une période (M9-09 §E, tuile M13). */
+export interface BrewedVolumeSummary {
+  /** Volume total (L) : conditionné quand il est connu, sinon ensemencé. */
+  totalL: number;
+  /** Nombre de brassins ayant contribué. */
+  batches: number;
+}
+
 /** Données de planification (le service a validé + dérivé version/snapshot). */
 export interface BatchCreateData {
   recipeId: string;
@@ -111,6 +148,19 @@ export interface BatchCostInputs {
 
 export interface BatchRepository {
   list(filters: BatchListFilters): Promise<BatchSummaryView[]>;
+  /**
+   * Brassins de la vue enrichie (M9-09), avec état du jour et jalons chargés en
+   * **requêtes groupées**. Rend l'ensemble filtré : le tri (« en cours d'abord,
+   * puis prochaine échéance ») dépend des jalons et ne s'exprime pas en SQL
+   * simple, il est donc appliqué par le service, qui pagine ensuite. Le volume
+   * reste borné par les filtres — une brasserie associative compte des dizaines
+   * de brassins, pas des millions.
+   */
+  listOverview(filters: BatchOverviewFilters): Promise<BatchOverviewRow[]>;
+  /** Volume brassé sur une période (conditionné, à défaut ensemencé). */
+  brewedVolume(from?: Date, to?: Date): Promise<BrewedVolumeSummary>;
+  /** Fuseau de l'instance (`Settings.timezone`) — pour les dates calendaires. */
+  timezone(): Promise<string>;
   findById(id: string): Promise<BatchDetailView | null>;
   /** Crée un batch **et** ses réservations `RESERVED` (atomique). */
   create(
@@ -193,6 +243,90 @@ function milestonePatch(status: BatchStatus, at: Date): Prisma.BatchUpdateInput 
 
 export class PrismaBatchRepository implements BatchRepository {
   constructor(private readonly prisma: PrismaClient) {}
+
+  async listOverview(filters: BatchOverviewFilters): Promise<BatchOverviewRow[]> {
+    const period =
+      filters.from !== undefined || filters.to !== undefined
+        ? {
+            ...(filters.from !== undefined ? { gte: filters.from } : {}),
+            ...(filters.to !== undefined ? { lte: filters.to } : {}),
+          }
+        : undefined;
+
+    // Une seule requête : les jalons et l'état du jour viennent en `include`,
+    // donc groupés par Prisma — jamais une requête par brassin (N+1).
+    const rows = await this.prisma.batch.findMany({
+      where: {
+        ...(filters.statuses && filters.statuses.length > 0
+          ? { status: { in: filters.statuses } }
+          : {}),
+        ...(filters.recipeId ? { recipeId: filters.recipeId } : {}),
+        // La période porte sur la date de brassage, à défaut celle planifiée :
+        // c'est ainsi qu'un brassin se situe dans le temps à l'atelier.
+        ...(period ? { OR: [{ brewedAt: period }, { brewedAt: null, plannedAt: period }] } : {}),
+      },
+      select: {
+        ...SUMMARY_SELECT,
+        recipeSnapshot: true,
+        dayState: { select: { phase: true } },
+        milestones: {
+          orderBy: { sortOrder: "asc" },
+          select: { kind: true, plannedEndAt: true, actualEndAt: true, sortOrder: true },
+        },
+      },
+      orderBy: { batchNumber: "desc" },
+    });
+
+    return rows.map(({ dayState, ...row }) => ({ ...row, dayPhase: dayState?.phase ?? null }));
+  }
+
+  async timezone(): Promise<string> {
+    const settings = await this.prisma.settings.findFirst({ select: { timezone: true } });
+    // Même valeur que le `@default` du schéma : une instance sans ligne
+    // `Settings` doit continuer d'afficher ses brassins.
+    return settings?.timezone ?? "Europe/Paris";
+  }
+
+  async brewedVolume(from?: Date, to?: Date): Promise<BrewedVolumeSummary> {
+    const period =
+      from !== undefined || to !== undefined
+        ? { ...(from !== undefined ? { gte: from } : {}), ...(to !== undefined ? { lte: to } : {}) }
+        : undefined;
+
+    // Mesures de volume des brassins de la période, en une requête.
+    const measures = await this.prisma.batchMeasure.findMany({
+      where: {
+        type: "VOLUME",
+        phase: { in: ["CONDITIONNEMENT", "ENSEMENCEMENT"] },
+        ...(period
+          ? { batch: { OR: [{ brewedAt: period }, { brewedAt: null, plannedAt: period }] } }
+          : {}),
+      },
+      orderBy: { loggedAt: "asc" },
+      select: { batchId: true, phase: true, value: true },
+    });
+
+    // Un brassin compte **une fois** : son volume conditionné s'il est connu,
+    // sinon son volume ensemencé. Les additionner compterait le même moût deux
+    // fois.
+    const byBatch = new Map<string, { packaged?: number; pitched?: number }>();
+    for (const m of measures) {
+      const entry = byBatch.get(m.batchId) ?? {};
+      if (m.phase === "CONDITIONNEMENT") entry.packaged = m.value;
+      else entry.pitched = m.value;
+      byBatch.set(m.batchId, entry);
+    }
+
+    let totalL = 0;
+    let batches = 0;
+    for (const { packaged, pitched } of byBatch.values()) {
+      const volume = packaged ?? pitched;
+      if (volume === undefined || !Number.isFinite(volume)) continue;
+      totalL += volume;
+      batches += 1;
+    }
+    return { totalL: Math.round(totalL * 1e6) / 1e6, batches };
+  }
 
   list(filters: BatchListFilters): Promise<BatchSummaryView[]> {
     return this.prisma.batch.findMany({
