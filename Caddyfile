@@ -17,8 +17,13 @@
 		-Server
 	}
 
-	# API : /api/* → conteneur api
-	handle /api/* {
+	# API → conteneur api. En plus des routes métier préfixées /api/*, l'API sert
+	# aussi des routes à la racine : /auth/* (session), /health (sonde) et
+	# /webhooks/* (SumUp/Zettle/HelloAsso, signés HMAC). Sans ce routage, ces
+	# chemins tombaient sur le fallback SPA ci-dessous → login et webhooks cassés
+	# en prod derrière Caddy (#215).
+	@api path /api/* /auth/* /health /webhooks/*
+	handle @api {
 		reverse_proxy api:{$API_PORT}
 	}
 

@@ -94,10 +94,11 @@ l'API est **dérivée** des `POSTGRES_*` ; la ligne `DATABASE_URL` du `.env` ser
   fait échouer la validation de config au démarrage (message explicite listant la variable).
 - Pas de certificat TLS → `docker compose logs caddy` : vérifier que `DOMAIN` résout
   vers la machine et que les ports 80/443 sont ouverts (ACME HTTP-01).
-- ⚠️ **Point de vigilance routage** : le `Caddyfile` proxifie `/api/*` vers l'API,
-  mais les routes `/auth/*` et `/health` sont servies **à la racine** de l'API. Vérifier
-  que le reverse proxy transmet bien l'authentification vers l'API pour l'installation
-  cible (voir « Limitations connues »).
+- **Smoke-test routage à travers Caddy** (#215) : `curl -fsS https://$DOMAIN/health`
+  doit renvoyer `{"status":"ok"}` (et **non** l'`index.html` de la SPA). Un
+  `POST https://$DOMAIN/auth/login` doit atteindre l'API (401/200 selon identifiants),
+  pas le fallback SPA. Le `Caddyfile` route désormais `/api/*`, `/auth/*`, `/health`
+  et `/webhooks/*` vers l'API.
 
 ---
 
@@ -244,11 +245,6 @@ docker compose logs -f postgres   # base
 
 ## Limitations connues (à confirmer avant mise en production réelle)
 
-- **Routage Caddy** : `Caddyfile` proxifie uniquement `/api/*` vers l'API ; or `/auth/*`
-  et `/health` sont exposés **à la racine** de l'API (`apps/api/src/app.ts`). La livraison
-  web de production était marquée « finalisée en M0-08 » dans le `Caddyfile`. Avant un
-  déploiement réel, confirmer que l'authentification est bien routée vers l'API (et non
-  vers le fallback SPA). À traiter comme un ticket dédié si l'écart se confirme.
 - Les procédures « données » (migrations sur base vierge, sauvegarde → restauration →
   vérification) ont été **rejouées** ; le déploiement TLS complet (Caddy + domaine réel)
   dépend de l'infrastructure d'hébergement de l'exploitant.
