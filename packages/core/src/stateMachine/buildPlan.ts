@@ -183,7 +183,22 @@ function extractSteps(snapshot: unknown): readonly RawStep[] {
 type PhaseCounters = Partial<Record<Phase, number>>;
 
 const REQUIRED_TEMP: readonly MeasurementKind[] = ["temperature"];
+/** Filtration : densité **et** volume pré-ébullition — origine de la chaîne (§13.2). */
 const REQUIRED_LAUTER: readonly MeasurementKind[] = ["density", "volume"];
+/**
+ * Prises de volume ajoutées en M9-06 (FORMULES §13.2) : sans elles, un brassin
+ * terminé ne sait pas combien il a produit.
+ * - fin d'ébullition → volume post-ébullition ;
+ * - ensemencement → volume ensemencé (déjà exploité par l'ajustement de stock M5).
+ *
+ * Le volume **conditionné** n'en fait pas partie : il se relève en fin de garde,
+ * bien après le Jour J (M9-13).
+ *
+ * Ces mesures conditionnent la validation **nominale** ; « forcer l'étape » reste
+ * ouvert et journalise l'écart, de sorte qu'un brassin engagé avant ce
+ * déploiement n'est jamais coincé.
+ */
+const REQUIRED_VOLUME: readonly MeasurementKind[] = ["volume"];
 
 /**
  * Mappe une étape de recette vers une {@link StepSpec} Jour J, ou `null` si le
@@ -250,6 +265,7 @@ function mapStep(
           equipment,
         ),
         targetTempC: BOIL_TARGET_C,
+        requiredMeasurements: REQUIRED_VOLUME,
       };
     }
 
@@ -293,6 +309,7 @@ function mapStep(
         phase: "PITCHING",
         label: raw.name ?? "Ensemencement",
         requiresStabilization: false,
+        requiredMeasurements: REQUIRED_VOLUME,
       };
     }
 
@@ -525,7 +542,14 @@ function withSanitizeStep(steps: readonly StepSpec[], leadMin: number | undefine
 
   const sanitizeMin = Math.min(leadMin, boilMin);
 
-  result[boilIndex] = { ...boil, plannedHoldMin: Math.max(0, boilMin - leadMin) };
+  // La prise de volume post-ébullition (M9-06) appartient à la **fin** de
+  // l'ébullition : elle suit donc l'assainissement — dernière étape à feu vif —
+  // plutôt que de rester sur un `boil-1` qui s'achève désormais plus tôt.
+  const { requiredMeasurements: boilMeasurements, ...boilWithoutMeasurements } = boil;
+  result[boilIndex] = {
+    ...boilWithoutMeasurements,
+    plannedHoldMin: Math.max(0, boilMin - leadMin),
+  };
   result.splice(boilIndex + 1, 0, {
     id: "boil-sanitize-1",
     phase: "BOIL",
@@ -533,6 +557,7 @@ function withSanitizeStep(steps: readonly StepSpec[], leadMin: number | undefine
     requiresStabilization: false,
     plannedHoldMin: sanitizeMin,
     targetTempC: BOIL_TARGET_C,
+    requiredMeasurements: boilMeasurements,
   });
   return result;
 }

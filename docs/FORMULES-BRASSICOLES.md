@@ -684,6 +684,14 @@ volumeConditionné                                      // MESURÉ en fin de gar
 sur son estimation, et les deux natures doivent rester distinguables en sortie : un
 volume relevé et un volume déduit n'ont pas la même valeur de preuve.
 
+> **Comment chaque volume est constaté.** `volumePréÉbullition` et `volumeEnsemencé`
+> sont des **relevés de volume** (filtration, ensemencement). `volumeConditionné`,
+> lui, ne se relève **pas** en vrac : l'opérateur saisit le **nombre de contenants
+> par type et le volume rempli**, et le volume conditionné en est la somme
+> (`Σ volume × quantité`, cf. §13.3 et `BatchPackaging`). Ne pas prévoir de champ
+> « volume conditionné » saisi directement : il ferait doublon avec le décompte des
+> contenants, et les deux divergeraient.
+
 **Rendement de conditionnement :**
 
 ```

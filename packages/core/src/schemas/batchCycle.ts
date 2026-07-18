@@ -58,5 +58,18 @@ export const buildBatchMilestonesInputSchema = z.object({
   hasDryHop: z.boolean(),
 });
 
+/**
+ * Ligne de conditionnement saisie par l'opérateur (miroir de `PackagingLine` et
+ * de `BatchPackaging`, M9-02) : « N contenants de X litres ». Le volume unitaire
+ * est celui **réellement rempli**, pas la contenance nominale du catalogue.
+ */
+export const packagingLineSchema = z.object({
+  /** Volume rempli par contenant (L, unité interne). */
+  containerVolumeL: z.number().nonnegative(),
+  /** Nombre de contenants — entier : on ne conditionne pas 2,5 bouteilles. */
+  quantity: z.number().int().nonnegative(),
+});
+
+export type PackagingLineInput = z.infer<typeof packagingLineSchema>;
 export type CycleDurationsInput = z.infer<typeof cycleDurationsSchema>;
 export type BuildBatchMilestonesInputParsed = z.infer<typeof buildBatchMilestonesInputSchema>;
