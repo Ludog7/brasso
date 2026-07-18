@@ -19,6 +19,7 @@ export const phaseSchema = z.enum([
   "MASH",
   "LAUTER",
   "BOIL",
+  "WHIRLPOOL",
   "COOLING",
   "PITCHING",
 ]);
@@ -88,6 +89,13 @@ export const stepSpecSchema = z.object({
   plannedHoldMin: z.number().nonnegative().optional(),
   plannedRampMin: z.number().nonnegative().optional(),
   targetTempC: z.number().optional(),
+  /**
+   * M9-03 — **doit** figurer ici : le plan est persisté en JSONB puis relu à
+   * chaque reprise de session. Un champ absent de ce schéma serait silencieusement
+   * effacé par Zod au round-trip, et la contrainte de température du
+   * refroidissement disparaîtrait après le premier rechargement.
+   */
+  targetTempConstraint: z.enum(["at_most", "at_least"]).optional(),
   requiredMeasurements: z.array(measurementKindSchema).optional(),
 });
 

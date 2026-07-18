@@ -11,8 +11,16 @@
  * brute, volumes en L, instants en **epoch ms**.
  */
 
-/** Phases canoniques du Jour J (spec « Structure des étapes »). */
-export type Phase = "INITIALIZATION" | "MASH" | "LAUTER" | "BOIL" | "COOLING" | "PITCHING";
+/**
+ * Phases canoniques du Jour J (spec « Structure des étapes »).
+ *
+ * `WHIRLPOOL` (M9-03) s'intercale entre `BOIL` et `COOLING`. Elle est
+ * **optionnelle** — tous les brassins n'en comportent pas — et n'apparaît donc
+ * dans un plan que si la recette déclare une étape `WHIRLPOOL` ; elle ne fait
+ * volontairement pas partie de {@link CANONICAL_PHASES} ni du plan par défaut.
+ */
+export type Phase =
+  "INITIALIZATION" | "MASH" | "LAUTER" | "BOIL" | "WHIRLPOOL" | "COOLING" | "PITCHING";
 
 /** Nature d'une mesure saisie pendant le brassage. */
 export type MeasurementKind = "density" | "volume" | "temperature" | "ph";
@@ -45,8 +53,44 @@ export interface StepSpec {
   readonly plannedRampMin?: number;
   /** Température cible du palier (°C), indicative. */
   readonly targetTempC?: number;
+  /**
+   * Si défini, la validation en mode normal exige que la **dernière température
+   * relevée** sur l'étape respecte {@link targetTempC} dans ce sens (M9-03) :
+   * - `at_most` — refroidissement : le moût doit être **descendu** à la cible ;
+   * - `at_least` — chauffe : la cible doit être **atteinte**.
+   *
+   * Sans {@link targetTempC}, la contrainte est ignorée (rien à comparer).
+   * Une contrainte non satisfaite **refuse** la validation mais ne fait jamais
+   * perdre les mesures déjà saisies — c'est le correctif du bug « la validation
+   * du refroidissement n'enchaîne pas ».
+   */
+  readonly targetTempConstraint?: "at_most" | "at_least";
   /** Mesures exigées pour **valider en mode normal** (ignorées si on force l'étape). */
   readonly requiredMeasurements?: readonly MeasurementKind[];
+}
+
+/**
+ * Verdict de validabilité de l'étape courante (M9-03) — **contrat explicite**
+ * pour l'écran, qui ne doit pas déduire ce qu'il a le droit de proposer par
+ * l'absence d'un champ.
+ *
+ * Distinction essentielle : `canValidate` décrit une progression **nominale**
+ * (aucun écart de procédure). « Forcer l'étape » reste toujours possible, mais
+ * produit un {@link DeviationLog} — il ne doit donc pas servir à avancer sur une
+ * étape qui n'a simplement pas de timer.
+ */
+export interface StepValidationCheck {
+  /** L'étape peut-elle être validée maintenant, sans écart ? */
+  readonly canValidate: boolean;
+  /** Motifs de blocage (vide si {@link canValidate}), rédigés pour l'affichage. */
+  readonly blockedBy: readonly string[];
+  /**
+   * L'étape n'a **aucune barrière temporelle** (ni palier, ni stabilisation) :
+   * elle attend une validation explicite de l'opérateur. C'est ce qui doit faire
+   * apparaître un bouton « Valider l'étape » — sans quoi une filtration sans
+   * timer laisse l'écran sans issue (bug M9-03).
+   */
+  readonly awaitsManualValidation: boolean;
 }
 
 /** Plan du Jour J : suite ordonnée d'étapes (le modèle). */

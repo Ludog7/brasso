@@ -47,6 +47,8 @@ export function phaseToDayPhase(phase: Phase | null): DayPhase {
       return "FILTRATION";
     case "BOIL":
       return "EBULLITION";
+    case "WHIRLPOOL":
+      return "WHIRLPOOL";
     case "COOLING":
       return "REFROIDISSEMENT";
     case "PITCHING":
@@ -73,6 +75,16 @@ export interface BuildDayPlanInput {
   readonly recipeSnapshot: unknown;
   /** Profil d'équipement du batch (rampes indicatives) — optionnel. */
   readonly equipment?: PlanEquipment;
+  /**
+   * Délai (min) avant le hors-flamme auquel démarre l'**assainissement du
+   * circuit de refroidissement** (`Settings.coolingCircuitSanitizeLeadMin`,
+   * M9-02). Paramètre métier fourni par l'appelant — `core` n'en code aucune
+   * valeur par défaut (ADR-01).
+   *
+   * **Omis ou ≤ 0 ⇒ aucune étape d'assainissement n'est dérivée.** On préfère ne
+   * rien inventer plutôt que de supposer un délai : l'API le lit des `Settings`.
+   */
+  readonly coolingCircuitSanitizeLeadMin?: number;
 }
 
 /** Rampe de chauffe indicative par défaut (min) de l'empâtage, faute de profil. */
@@ -224,6 +236,21 @@ function mapStep(
       };
     }
 
+    case "WHIRLPOOL": {
+      // M9-03 : réintégré au périmètre Jour J (auparavant droppé par le `default`).
+      // Le whirlpool ne vise pas une consigne de chauffe — on n'attend donc aucune
+      // stabilisation ; il tourne éventuellement pendant une durée déclarée.
+      const n = next("WHIRLPOOL");
+      return {
+        id: `whirlpool-${n}`,
+        phase: "WHIRLPOOL",
+        label: raw.name ?? "Whirlpool",
+        requiresStabilization: false,
+        plannedHoldMin: finiteNumber(raw.params.timeMin),
+        targetTempC: finiteNumber(raw.params.tempC),
+      };
+    }
+
     case "COOL": {
       const n = next("COOLING");
       return {
@@ -232,6 +259,9 @@ function mapStep(
         label: raw.name ?? "Refroidissement",
         requiresStabilization: true,
         targetTempC: finiteNumber(raw.params.targetTempC),
+        // Le moût doit être **descendu** à la cible pour enchaîner sur
+        // l'ensemencement (M9-03, bug « la validation n'avance pas »).
+        targetTempConstraint: "at_most",
         requiredMeasurements: REQUIRED_TEMP,
       };
     }
@@ -260,14 +290,81 @@ function mapStep(
  *
  * Le plan démarre toujours par un jalon `INITIALISATION`, puis reprend, **dans
  * l'ordre de la recette**, les étapes exploitables : empâtage(s) → filtration →
- * ébullition → refroidissement → ensemencement. Un empâtage multi-paliers produit
- * autant d'étapes `MASH` (`mash-1`, `mash-2`, …). Le plan est directement
- * consommable par `transition`/`initDayState` (M1-13).
+ * ébullition → [assainissement du circuit] → whirlpool → refroidissement →
+ * ensemencement. Un empâtage multi-paliers produit autant d'étapes `MASH`
+ * (`mash-1`, `mash-2`, …). L'étape d'assainissement est **dérivée**, jamais lue
+ * du snapshot (cf. {@link withSanitizeStep}) ; le whirlpool n'apparaît que si la
+ * recette en déclare un. Le plan est directement consommable par
+ * `transition`/`initDayState` (M1-13).
  *
  * @returns le plan dérivé, ou {@link defaultDayPlan} si le snapshot n'expose
  *   aucune étape exploitable (recette vide, snapshot corrompu…).
  */
-export function buildDayPlan({ recipeSnapshot, equipment }: BuildDayPlanInput): DayPlan {
+/**
+ * Insère l'étape d'**assainissement du circuit de refroidissement** (M9-03).
+ *
+ * Pourquoi *dériver* plutôt que lire le snapshot : `recipeSnapshot` est immuable
+ * (ADR-07). Les brassins déjà planifiés ne porteront jamais cette étape, et
+ * modifier les recettes n'y changerait rien — la seule façon d'en faire
+ * bénéficier l'existant est de la calculer.
+ *
+ * **Découpage de l'ébullition.** L'assainissement consiste à faire circuler le
+ * moût **encore bouillant** dans le circuit, juste avant le hors-flamme. Le plan
+ * étant une suite d'étapes, on scinde l'ébullition : `boil` tient
+ * `durée − délai`, puis l'assainissement tient les `délai` dernières minutes. Le
+ * temps d'ébullition **total est conservé**, et l'étape tombe bien pendant
+ * l'ébullition — non après, ce qui la viderait de son sens.
+ *
+ * Conditions : un délai > 0, une étape `BOIL` de **durée connue**, et au moins
+ * un refroidissement (sans circuit à assainir, on n'invente pas l'étape).
+ * Si la durée d'ébullition est inférieure au délai, l'assainissement occupe
+ * toute l'ébullition (l'étape `BOIL` tombe à 0) plutôt que de produire un temps
+ * négatif ou d'être omise.
+ *
+ * ADR-11 : cette étape est un **indicateur d'aide à la décision**. Le vocabulaire
+ * évite « stérilisation » / « stérile » — on n'atteste d'aucune innocuité.
+ */
+function withSanitizeStep(steps: readonly StepSpec[], leadMin: number | undefined): StepSpec[] {
+  const result = [...steps];
+  if (leadMin === undefined || !Number.isFinite(leadMin) || leadMin <= 0) return result;
+  if (!result.some((s) => s.phase === "COOLING")) return result;
+
+  // Dernière ébullition de durée connue (parcours inverse : `findLastIndex` n'est
+  // pas dans la cible TS du package). On retient l'étape *et* sa durée dans la
+  // boucle : le type est alors resserré sans repli défensif inatteignable.
+  let boilIndex = -1;
+  let boil: StepSpec | undefined;
+  let boilMin = 0;
+  for (let i = result.length - 1; i >= 0; i -= 1) {
+    const s = result[i];
+    if (s !== undefined && s.phase === "BOIL" && s.plannedHoldMin !== undefined) {
+      boilIndex = i;
+      boil = s;
+      boilMin = s.plannedHoldMin;
+      break;
+    }
+  }
+  if (boil === undefined) return result;
+
+  const sanitizeMin = Math.min(leadMin, boilMin);
+
+  result[boilIndex] = { ...boil, plannedHoldMin: Math.max(0, boilMin - leadMin) };
+  result.splice(boilIndex + 1, 0, {
+    id: "boil-sanitize-1",
+    phase: "BOIL",
+    label: "Assainissement du circuit de refroidissement",
+    requiresStabilization: false,
+    plannedHoldMin: sanitizeMin,
+    targetTempC: BOIL_TARGET_C,
+  });
+  return result;
+}
+
+export function buildDayPlan({
+  recipeSnapshot,
+  equipment,
+  coolingCircuitSanitizeLeadMin,
+}: BuildDayPlanInput): DayPlan {
   const counters: PhaseCounters = {};
   const mapped: StepSpec[] = [];
   for (const raw of extractSteps(recipeSnapshot)) {
@@ -279,6 +376,6 @@ export function buildDayPlan({ recipeSnapshot, equipment }: BuildDayPlanInput): 
 
   return [
     { id: "init", phase: "INITIALIZATION", label: "Initialisation", requiresStabilization: false },
-    ...mapped,
+    ...withSanitizeStep(mapped, coolingCircuitSanitizeLeadMin),
   ];
 }
