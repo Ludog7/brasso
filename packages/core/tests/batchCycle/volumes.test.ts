@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { batchVolumeChain, packagingYield } from "../../src/batchCycle/volumes.js";
+import {
+  batchVolumeChain,
+  packagedVolumeFromLines,
+  packagingYield,
+} from "../../src/batchCycle/volumes.js";
 
 /** Profil d'équipement de référence : évaporation 3 L/h, 1 L mort, 0,5 L au transfert. */
 const EQUIPMENT = { evaporationRateLPerHour: 3, deadspaceL: 1, transferLossL: 0.5 };
@@ -79,25 +83,29 @@ describe("batchVolumeChain — chaîne des volumes (FORMULES §13.2)", () => {
     expect(chain.transferred).toEqual({ volumeL: 24, source: "measured" });
   });
 
-  it("volumes ensemencé et conditionné : mesurés ou inconnus, jamais estimés", () => {
+  it("volumes ensemencé et conditionné : constatés ou inconnus, jamais estimés", () => {
     const withoutMeasures = batchVolumeChain({
       preBoilL: 30,
       boilTimeMin: 60,
       equipment: EQUIPMENT,
     });
-    // On n'invente pas une donnée que seul l'opérateur peut constater.
+    // On n'invente pas une donnée que seul l'opérateur peut établir.
     expect(withoutMeasures.pitched).toEqual({ volumeL: null, source: "unknown" });
     expect(withoutMeasures.packaged).toEqual({ volumeL: null, source: "unknown" });
 
     const withMeasures = batchVolumeChain({
       preBoilL: 30,
-      pitchedL: 25,
-      packagedL: 24,
+      pitchedL: 25, // relevé de volume à l'ensemencement
+      packaging: [
+        { containerVolumeL: 20, quantity: 1 }, // …et décompte des contenants
+        { containerVolumeL: 0.75, quantity: 5 },
+      ],
       boilTimeMin: 60,
       equipment: EQUIPMENT,
     });
     expect(withMeasures.pitched).toEqual({ volumeL: 25, source: "measured" });
-    expect(withMeasures.packaged).toEqual({ volumeL: 24, source: "measured" });
+    // 20 + 3,75 = 23,75 L conditionnés.
+    expect(withMeasures.packaged).toEqual({ volumeL: 23.75, source: "measured" });
   });
 
   describe("données manquantes ou inexploitables", () => {
@@ -109,8 +117,8 @@ describe("batchVolumeChain — chaîne des volumes (FORMULES §13.2)", () => {
       expect(chain.evaporationL).toBe(3);
     });
 
-    it("une mesure aval reste exploitable sans amont", () => {
-      const chain = batchVolumeChain({ packagedL: 24 });
+    it("une donnée aval reste exploitable sans amont", () => {
+      const chain = batchVolumeChain({ packaging: [{ containerVolumeL: 24, quantity: 1 }] });
       expect(chain.preBoil.volumeL).toBeNull();
       expect(chain.packaged).toEqual({ volumeL: 24, source: "measured" });
     });
@@ -159,14 +167,74 @@ describe("batchVolumeChain — chaîne des volumes (FORMULES §13.2)", () => {
     });
   });
 
-  it("bout en bout : la chaîne mesurée alimente le rendement de conditionnement", () => {
+  it("bout en bout : les contenants saisis alimentent le rendement de conditionnement", () => {
     const chain = batchVolumeChain({
       preBoilL: 30,
       pitchedL: 25.5,
-      packagedL: 24,
+      // 1 fût de 20 L + 8 bouteilles de 0,5 L = 24 L conditionnés.
+      packaging: [
+        { containerVolumeL: 20, quantity: 1 },
+        { containerVolumeL: 0.5, quantity: 8 },
+      ],
       boilTimeMin: 60,
       equipment: EQUIPMENT,
     });
+    expect(chain.packaged.volumeL).toBe(24);
     expect(packagingYield(chain.preBoil.volumeL, chain.packaged.volumeL)).toEqual({ percent: 80 });
+  });
+});
+
+describe("packagedVolumeFromLines — volume déduit des contenants saisis", () => {
+  it("somme volume × quantité sur toutes les lignes", () => {
+    expect(
+      packagedVolumeFromLines([
+        { containerVolumeL: 20, quantity: 1 },
+        { containerVolumeL: 0.75, quantity: 5 },
+      ]),
+    ).toBe(23.75);
+  });
+
+  it("retient le volume réellement rempli, pas la contenance nominale", () => {
+    // Un fût de 20 L n'ayant reçu que 18 L compte pour 18.
+    expect(packagedVolumeFromLines([{ containerVolumeL: 18, quantity: 2 }])).toBe(36);
+  });
+
+  it("une quantité nulle contribue pour zéro sans invalider la saisie", () => {
+    expect(
+      packagedVolumeFromLines([
+        { containerVolumeL: 20, quantity: 0 },
+        { containerVolumeL: 0.5, quantity: 4 },
+      ]),
+    ).toBe(2);
+  });
+
+  it("aucune ligne → null : un conditionnement non saisi n'est pas un volume nul", () => {
+    expect(packagedVolumeFromLines([])).toBeNull();
+    expect(packagedVolumeFromLines(undefined)).toBeNull();
+  });
+
+  it("ignore les lignes inexploitables, garde les valides", () => {
+    expect(
+      packagedVolumeFromLines([
+        { containerVolumeL: Number.NaN, quantity: 3 },
+        { containerVolumeL: -5, quantity: 3 },
+        { containerVolumeL: 10, quantity: -2 },
+        { containerVolumeL: 10, quantity: 2.5 }, // on ne conditionne pas 2,5 fûts
+        { containerVolumeL: 10, quantity: Number.POSITIVE_INFINITY },
+        { containerVolumeL: 0.5, quantity: 4 },
+      ]),
+    ).toBe(2);
+  });
+
+  it("aucune ligne exploitable → null, jamais 0", () => {
+    expect(packagedVolumeFromLines([{ containerVolumeL: 10, quantity: 1.5 }])).toBeNull();
+  });
+
+  it("tolère une ligne absente du tableau sans lever", () => {
+    const lines = [undefined, { containerVolumeL: 20, quantity: 1 }] as unknown as {
+      containerVolumeL: number;
+      quantity: number;
+    }[];
+    expect(packagedVolumeFromLines(lines)).toBe(20);
   });
 });

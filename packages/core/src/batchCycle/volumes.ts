@@ -20,6 +20,19 @@ export interface VolumeChainEquipment {
   readonly evaporationRateLPerHour?: number;
 }
 
+/**
+ * Ligne de conditionnement telle que saisie par l'opérateur : « N contenants de
+ * X litres ». Miroir de `BatchPackaging` (M9-02) — le volume unitaire est celui
+ * **réellement rempli** le jour du conditionnement, pas la contenance nominale
+ * du catalogue (un fût de 20 L peut n'en recevoir que 18).
+ */
+export interface PackagingLine {
+  /** Volume rempli par contenant (L, unité interne — jamais des centilitres). */
+  readonly containerVolumeL: number;
+  /** Nombre de contenants (entier : on ne conditionne pas 2,5 bouteilles). */
+  readonly quantity: number;
+}
+
 /** Entrée de {@link batchVolumeChain} : ce qui a été **mesuré**, plus le contexte. */
 export interface BatchVolumeChainInput {
   /** Volume pré-ébullition **mesuré** à la filtration (L) — origine de la chaîne. */
@@ -30,8 +43,13 @@ export interface BatchVolumeChainInput {
   readonly transferredL?: number;
   /** Volume **ensemencé** mesuré (L) — relevé au pitching. */
   readonly pitchedL?: number;
-  /** Volume **conditionné** mesuré (L) — relevé en fin de garde, hors Jour J. */
-  readonly packagedL?: number;
+  /**
+   * Conditionnement : ce que l'opérateur saisit réellement en fin de garde, soit
+   * le **nombre de contenants par type** et leur volume rempli. Le volume
+   * conditionné s'en déduit — il ne se relève pas en vrac
+   * (cf. {@link packagedVolumeFromLines}).
+   */
+  readonly packaging?: readonly PackagingLine[];
   /** Durée d'ébullition (min) — pilote la perte par évaporation. */
   readonly boilTimeMin?: number;
   readonly equipment?: VolumeChainEquipment;
@@ -86,6 +104,35 @@ function step(measuredL: number | undefined, estimatedL: number | null): VolumeS
 }
 
 /**
+ * Volume conditionné (L) déduit des contenants saisis : `Σ volume × quantité`.
+ *
+ * C'est ainsi que la donnée est **constatée** en fin de garde — l'opérateur
+ * compte des contenants, il ne relève pas un volume global. La somme a donc la
+ * même valeur de preuve qu'une mesure.
+ *
+ * Lecture défensive : une ligne inexploitable (volume ou quantité non finis,
+ * négatifs, quantité non entière) est **ignorée**. Aucune ligne exploitable ⇒
+ * `null` — un conditionnement non saisi n'est pas un volume nul.
+ */
+export function packagedVolumeFromLines(
+  lines: readonly PackagingLine[] | undefined,
+): number | null {
+  if (lines === undefined || lines.length === 0) return null;
+
+  let total = 0;
+  let counted = 0;
+  for (const line of lines) {
+    const volumeL = finite(line?.containerVolumeL);
+    const quantity = finite(line?.quantity);
+    if (volumeL === undefined || volumeL < 0) continue;
+    if (quantity === undefined || quantity < 0 || !Number.isInteger(quantity)) continue;
+    total += volumeL * quantity;
+    counted += 1;
+  }
+  return counted === 0 ? null : total;
+}
+
+/**
  * Déroule la chaîne des volumes du brassin (FORMULES §13.2) :
  *
  * ```
@@ -95,9 +142,9 @@ function step(measuredL: number | undefined, estimatedL: number | null): VolumeS
  * ```
  *
  * Les volumes **ensemencé** et **conditionné** ne s'estiment pas : ils sont
- * mesurés (à l'ensemencement pour l'un, en fin de garde pour l'autre) ou
- * inconnus. En déduire une valeur reviendrait à inventer une donnée que seul
- * l'opérateur peut constater.
+ * constatés — relevé de volume à l'ensemencement, décompte des contenants en
+ * fin de garde — ou inconnus. En déduire une valeur reviendrait à inventer une
+ * donnée que seul l'opérateur peut établir.
  *
  * Chaque maillon indique s'il est mesuré ou estimé, une mesure primant toujours
  * sur son estimation.
@@ -123,12 +170,13 @@ export function batchVolumeChain(input: BatchVolumeChainInput): BatchVolumeChain
     postBoil.volumeL !== null ? postBoil.volumeL - transferLosses : null,
   );
 
+  const packagedL = packagedVolumeFromLines(input.packaging);
   return {
     preBoil,
     postBoil,
     transferred,
     pitched: step(input.pitchedL, null),
-    packaged: step(input.packagedL, null),
+    packaged: step(packagedL ?? undefined, null),
     evaporationL,
   };
 }
