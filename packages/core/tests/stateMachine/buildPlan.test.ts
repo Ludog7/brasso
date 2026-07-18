@@ -117,7 +117,8 @@ describe("buildDayPlan — dérivation recette → plan Jour J", () => {
       phase: "PITCHING",
       requiresStabilization: false,
     });
-    expect(map["pitching-1"].requiredMeasurements).toBeUndefined();
+    // M9-06 : l'ensemencement exige désormais le volume ensemencé.
+    expect(map["pitching-1"].requiredMeasurements).toEqual(["volume"]);
   });
 
   it("un seul jalon PITCHING même avec plusieurs étapes FERMENT", () => {
@@ -739,6 +740,116 @@ describe("M9-04 — alertes de houblonnage pendant l'ébullition", () => {
     // conserve le début et la durée totale (55 + 5 = 60).
     expect(map["boil-1"]?.hopAdditions?.map((a) => a.offsetFromStartMin)).toEqual([0, 60]);
     expect(map["boil-sanitize-1"]?.hopAdditions).toBeUndefined();
+  });
+});
+
+describe("M9-06 — prises de volume aux étapes clés", () => {
+  const brew = (extra: readonly unknown[] = []): unknown =>
+    snapshotOf([
+      step("MASH", { tempC: 66, timeMin: 60 }),
+      step("SPARGE", { tempC: 76 }),
+      step("BOIL", { timeMin: 60 }),
+      ...extra,
+      step("COOL", { targetTempC: 20 }),
+      step("FERMENT", {}),
+    ]);
+
+  it("non-régression : la filtration exige toujours densité ET volume", () => {
+    const plan = byId(buildDayPlan({ recipeSnapshot: brew() }));
+    expect(plan["lauter-1"]?.requiredMeasurements).toEqual(["density", "volume"]);
+  });
+
+  it("la fin d'ébullition exige le volume post-ébullition", () => {
+    const plan = byId(buildDayPlan({ recipeSnapshot: brew() }));
+    expect(plan["boil-1"]?.requiredMeasurements).toEqual(["volume"]);
+  });
+
+  it("l'ensemencement exige le volume ensemencé", () => {
+    const plan = byId(buildDayPlan({ recipeSnapshot: brew() }));
+    expect(plan["pitching-1"]?.requiredMeasurements).toEqual(["volume"]);
+  });
+
+  it("le volume conditionné n'est pas une mesure du Jour J", () => {
+    // Il se relève en fin de garde (M9-13) : aucune étape du plan ne l'exige,
+    // et le refroidissement comme le whirlpool restent sur leurs propres mesures.
+    const plan = buildDayPlan({ recipeSnapshot: brew([step("WHIRLPOOL", { timeMin: 15 })]) });
+    const map = byId(plan);
+    expect(map["cooling-1"]?.requiredMeasurements).toEqual(["temperature"]);
+    expect(map["whirlpool-1"]?.requiredMeasurements).toBeUndefined();
+    // Trois prises de volume au total : filtration, fin d'ébullition, ensemencement.
+    const withVolume = plan.filter((s) => s.requiredMeasurements?.includes("volume"));
+    expect(withVolume.map((s) => s.id)).toEqual(["lauter-1", "boil-1", "pitching-1"]);
+  });
+
+  it("avec assainissement, la prise de volume suit la fin réelle de l'ébullition", () => {
+    const plan = byId(buildDayPlan({ recipeSnapshot: brew(), coolingCircuitSanitizeLeadMin: 5 }));
+    // L'ébullition s'achevant désormais 5 min plus tôt, la mesure passe sur
+    // l'assainissement — dernière étape à feu vif.
+    expect(plan["boil-1"]?.requiredMeasurements).toBeUndefined();
+    expect(plan["boil-sanitize-1"]?.requiredMeasurements).toEqual(["volume"]);
+  });
+
+  describe("rétro-compatibilité : un brassin engagé ne doit pas se retrouver coincé", () => {
+    const plan = buildDayPlan({ recipeSnapshot: brew() });
+
+    /** Amène l'état jusqu'à l'étape `stepId`, en forçant tout ce qui précède. */
+    const advanceTo = (stepId: string): DayState => {
+      let state = initDayState(plan);
+      let guard = 0;
+      while (currentStep(state)?.id !== stepId && guard < 20) {
+        guard += 1;
+        state = transition(state, {
+          type: "FORCE_STEP",
+          at: guard * 1_000,
+          author: "brasseur",
+          reason: "mise en place du contexte de test",
+        }).state;
+      }
+      return state;
+    };
+
+    it("l'étape se valide normalement une fois le volume saisi", () => {
+      let state = advanceTo("pitching-1");
+      state = transition(state, { type: "START_STEP", at: 10_000 }).state;
+      // Sans le relevé, la validation nominale est refusée…
+      expect(transition(state, { type: "VALIDATE_STEP", at: 11_000 }).rejection).toBeDefined();
+      // …et l'accepte dès qu'il est saisi.
+      state = transition(state, {
+        type: "RECORD_MEASUREMENT",
+        at: 12_000,
+        kind: "volume",
+        value: 25.5,
+      }).state;
+      expect(transition(state, { type: "VALIDATE_STEP", at: 13_000 }).rejection).toBeUndefined();
+    });
+
+    it("sans le relevé, « forcer l'étape » reste ouvert et journalise l'écart", () => {
+      let state = advanceTo("pitching-1");
+      state = transition(state, { type: "START_STEP", at: 10_000 }).state;
+      const forced = transition(state, {
+        type: "FORCE_STEP",
+        at: 11_000,
+        author: "brasseur",
+        reason: "brassin démarré avant la mise à jour",
+      });
+      expect(forced.rejection).toBeUndefined();
+      expect(forced.deviation).toMatchObject({ stepId: "pitching-1", phase: "PITCHING" });
+      // Le brassin avance : il n'est pas coincé.
+      expect(currentStep(forced.state)).toBeNull();
+    });
+
+    it("les mesures déjà saisies ne sont jamais perdues par un refus de validation", () => {
+      let state = advanceTo("boil-1");
+      state = transition(state, { type: "START_STEP", at: 10_000 }).state;
+      state = transition(state, {
+        type: "CONFIRM_STABILIZATION",
+        at: 11_000,
+        temperatureC: 100,
+      }).state;
+      const refused = transition(state, { type: "VALIDATE_STEP", at: 12_000 });
+      expect(refused.rejection).toBeDefined();
+      expect(refused.state.measurements).toEqual(state.measurements);
+    });
   });
 });
 
