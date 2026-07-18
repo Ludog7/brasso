@@ -523,6 +523,12 @@ computeBiab(input): { totalWaterL, absorptionL, mashRatioLPerKg, strikeTempC }
 computeWaterPlan(input): { mashWaterL, spargeWaterL, totalWaterL, strikeTempC }
 dilutionWaterToTarget(input): { finalVolumeL, waterToAddL }
 
+// cycle post-ensemencement & conditionnement (M9, §13)
+buildBatchMilestones(input): Milestone[]
+batchVolumeChain(input): VolumeChain
+packagingYield(preBoilL, packagedL): number | null
+splitIntoContainers(volumeL, containers): Allocation[]
+
 // conversions (units.ts)
 gToKg, gToLb, lToGal, cToF, fToC, sgToPlato, platoToSg,
 srmToEbc, ebcToSrm, psiToBar, barToPsi
@@ -588,6 +594,160 @@ Tstrike      = (0.41 / ratioLkg) × (Tcible − Tgrain) + Tcible   // §6.3
 
 ---
 
+## 13. Cycle post-ensemencement & conditionnement (M9)
+
+Le brassin ne s'arrête pas à l'ensemencement : il enchaîne des phases longues
+(fermentation, dry hop, cold crash, garde) puis un **conditionnement** qui produit
+le stock vendable. Cette section décrit les trois familles de calcul associées :
+**dates des jalons** (§13.1), **chaîne des volumes** (§13.2) et **répartition en
+contenants** (§13.3).
+
+> **Nature de ces règles** : ce sont des **conventions d'atelier et d'inventaire**,
+> pas des modèles physico-chimiques. Elles n'ont pas de source bibliographique
+> externe — contrairement à Tinseth (§4) ou Terrill (§7.3) — et le présent document
+> en est la référence. C'est précisément pourquoi elles sont écrites ici avant
+> d'être codées : sans cela, chaque implémentation réinventerait sa propre variante.
+
+### 13.1 Jalons datés du cycle
+
+À la validation de l'ensemencement, on saisit des **durées prévisionnelles** ; les
+dates s'en déduisent par simple chaînage, chaque phase démarrant à la fin de la
+précédente :
+
+```
+dateDébut(phase₀)   = dateEnsemencement
+dateFin(phaseᵢ)     = dateDébut(phaseᵢ) + duréeᵢ            // en jours calendaires
+dateDébut(phaseᵢ₊₁) = dateFin(phaseᵢ)
+```
+
+**Séquence** : `FERMENTATION → DRY_HOP (conditionnelle) → COLD_CRASH → GARDE`.
+
+**Règles :**
+
+- **Dry hop conditionnel** — la phase n'existe que si la recette porte un
+  ingrédient de catégorie `HOP` avec `use = DRY_HOP`. Si elle est absente, la
+  séquence se referme **sans trou** : le cold crash enchaîne directement sur la
+  fermentation.
+- **Durée nulle ⇒ phase supprimée.** Une durée à 0 ne produit pas un jalon de durée
+  zéro : la phase disparaît de la séquence. (Conséquence à assumer côté UI : le
+  comportement doit être annoncé, sinon il se lit comme un bug.)
+- **Durées entières en jours**, bornées `[0, 365]`. Hors bornes ⇒ erreur de
+  validation, pas un écrêtage silencieux.
+- **Dates calendaires, pas des instants.** L'ajout se fait en jours **calendaires**
+  dans le fuseau de l'instance (`Settings.timezone`, défaut `Europe/Paris`), et
+  **non** par addition de `n × 86 400 000 ms`. Une garde de 21 jours reste 21 jours
+  calendaires même lorsqu'un changement d'heure survient pendant la période — le
+  calcul en millisecondes décalerait la date d'une heure et pourrait la faire
+  basculer d'un jour.
+- **Pureté** : la date d'ensemencement est une **entrée** ; aucune lecture d'horloge
+  (ADR-03).
+
+**Valeurs de référence** — ensemencement le **2026-03-01**, durées 14 / 3 / 2 / 21 j :
+
+| Phase | Durée | Fin |
+| --- | --- | --- |
+| Fermentation | 14 j | **2026-03-15** |
+| Dry hop | 3 j | **2026-03-18** |
+| Cold crash | 2 j | **2026-03-20** |
+| Garde | 21 j | **2026-04-10** |
+
+Cycle total **40 jours**. La même série **sans dry hop** (14 / 2 / 21) donne une fin
+de garde au **2026-04-07**, soit **37 jours** — la séquence se referme bien sans trou.
+
+> 🎯 **Cette série est volontairement un test de changement d'heure.** En zone
+> `Europe/Paris`, l'heure d'été 2026 débute le **dimanche 29 mars** (UTC+1 → UTC+2),
+> soit **à l'intérieur** de la phase de garde. Une implémentation qui ajouterait
+> `21 × 86 400 000 ms` au lieu de 21 jours calendaires **ne retomberait pas** sur le
+> 2026-04-10. Reprendre ces valeurs telles quelles en test suffit donc à verrouiller
+> le point ; il est inutile d'inventer un cas dédié.
+
+### 13.2 Chaîne des volumes du brassin
+
+Un brassin perd du volume à chaque étape. La chaîne ci-dessous n'introduit **aucun
+paramètre nouveau** : elle réutilise ceux du profil d'équipement (§ `EquipmentProfile`).
+
+```
+volumePréÉbullition                                    // MESURÉ à la filtration
+évaporation          = evaporationRateLPerHour × (dureeEbullitionMin / 60)
+volumePostÉbullition = volumePréÉbullition − évaporation
+volumeTransféré      = volumePostÉbullition − deadspaceL − transferLossL
+volumeEnsemencé                                        // MESURÉ à l'ensemencement
+volumeConditionné                                      // MESURÉ en fin de garde
+```
+
+> Les pertes au whirlpool (dépôt de trub laissé en cuve) sont couvertes par
+> `deadspaceL` et `transferLossL` **existants** — on n'ajoute pas de paramètre
+> dédié pour ce qui est déjà modélisé.
+
+**Mesuré ≠ estimé.** Chaque volume est soit **mesuré** (saisi par l'opérateur), soit
+**estimé** depuis le précédent et les pertes. Une valeur mesurée **prime toujours**
+sur son estimation, et les deux natures doivent rester distinguables en sortie : un
+volume relevé et un volume déduit n'ont pas la même valeur de preuve.
+
+**Rendement de conditionnement :**
+
+```
+rendementConditionnement (%) = 100 × volumeConditionné / volumePréÉbullition
+```
+
+> ⚠️ **À ne pas confondre avec `realEfficiency` (§9.1)**, qui mesure l'extraction des
+> **sucres** (points de densité obtenus / théoriques). Le rendement de conditionnement
+> mesure la conservation du **volume** à travers les pertes du process. Deux
+> indicateurs distincts, deux dénominateurs distincts.
+
+**Cas limites :**
+
+- `volumePréÉbullition` nul ou absent ⇒ résultat `null` (jamais une division par
+  zéro, jamais une exception).
+- Rendement **> 100 %** ⇒ physiquement impossible : la valeur est **retournée
+  assortie d'un avertissement**, jamais masquée ni écrêtée — c'est le signe d'une
+  saisie erronée, et la masquer empêcherait de la corriger.
+
+**Valeur de référence** : `volumePréÉbullition = 30 L`, `volumeConditionné = 24 L` →
+rendement **80,0 %**.
+
+### 13.3 Répartition du volume conditionné en contenants
+
+Un volume se répartit en contenants de contenance connue (bouteilles, fûts) :
+
+```
+nbUnités = floor(volumeDisponibleL / contenanceL)
+resteL   = volumeDisponibleL − nbUnités × contenanceL
+```
+
+**Règles :**
+
+- **Répartition descendante** lorsque plusieurs contenants sont servis depuis le même
+  volume : les plus **grands d'abord**, le reste finissant dans les plus petits. On
+  remplit ainsi le minimum de contenants, ce qui correspond à la pratique d'atelier.
+- **Le reste est conservé et affiché**, jamais arrondi ni absorbé silencieusement :
+  c'est un volume réel, qui part en dégustation ou en perte, et l'escamoter fausserait
+  le rendement de §13.2.
+- **Contenances en litres** (unité interne), jamais en centilitres dans les calculs.
+- Le résultat est une **proposition** d'aide à la saisie : les quantités enregistrées
+  restent celles saisies par l'opérateur.
+
+**Valeur de référence** : `volumeDisponible = 24 L`, contenants `fût 20 L` puis
+`bouteille 0,75 L` :
+
+| Contenant | Contenance | Unités | Volume employé | Reste |
+| --- | --- | --- | --- | --- |
+| Fût | 20 L | **1** | 20 L | 4 L |
+| Bouteille | 0,75 L | **5** | 3,75 L | **0,25 L** |
+
+Soit **1 fût + 5 bouteilles, reste 0,25 L**.
+
+### 13.4 Interfaces attendues
+
+```ts
+buildBatchMilestones(input): Milestone[]        // §13.1 — jalons datés
+batchVolumeChain(input): VolumeChain            // §13.2 — volumes mesurés/estimés
+packagingYield(preBoilL, packagedL): number | null   // §13.2 — rendement
+splitIntoContainers(volumeL, containers): Allocation[]  // §13.3
+```
+
+---
+
 ## Annexe A — `ebcToHex` (interpolation)
 
 Points d'ancrage (EBC → hex), interpoler linéairement en RGB entre deux ancres :
@@ -618,7 +778,23 @@ export const MASH_HEAT_RATIO = 0.41;      // strike water
 export const DEFAULT_EFFICIENCY = 72;     // %
 export const DEFAULT_MASH_RATIO = 3.0;    // L/kg
 export const GRAIN_ABSORPTION = 1.0;      // L/kg retenu par la drêche
+
+// Cycle post-ensemencement (§13.1)
+export const MAX_CYCLE_DURATION_DAYS = 365;  // borne haute d'une durée de phase
+export const MIN_CYCLE_DURATION_DAYS = 0;    // 0 = phase supprimée de la séquence
 ```
+
+> **Ce qui n'est PAS une constante ici.** Les **durées par défaut** du cycle
+> (fermentation 14 j, dry hop 3 j, cold crash 2 j, **garde 21 j**) sont des
+> **paramètres métier configurables** : ADR-01 interdit de coder en dur une constante
+> métier hors de la table `Settings`. Elles y vivent (`defaultFermentationDays`,
+> `defaultDryHopDays`, `defaultColdCrashDays`, `defaultConditioningDays`) et sont
+> **fournies en entrée** au calcul, jamais lues par `core`.
+>
+> De même, les **contenances de contenants** (33 cl, 75 cl, 20 L, 30 L…) sont des
+> **données de catalogue** (`CatalogItem` de `kind = CONDITIONNEMENT`), pas des
+> constantes : chaque association a son propre parc. Les valeurs citées en §13.3 ne
+> servent que d'illustration chiffrée.
 
 ---
 
@@ -631,6 +807,14 @@ export const GRAIN_ABSORPTION = 1.0;      // L/kg retenu par la drêche
 - **Carbonatation forcée** : régression pression/température/volumes CO₂ (loi de Henry) ; volumes par style selon tables grand public.
 - **Starter / taux d'inoculation** : Chris White & Jamil Zainasheff, *Yeast* (2010) ; taux usuels (ale ≈ 0,75 ; lager ≈ 1,5 million cellules/mL/°P) et plafond stir-plate ≈ 200·10⁹ cellules/L (conventions Mr Malty, Jamil Zainasheff). Aide à la décision — la croissance réelle dépend de l'oxygénation et de la souche.
 - **BIAB** : méthode « Brew In A Bag » (brassage une seule cuve, sans rinçage).
+- **Cycle post-ensemencement & conditionnement (§13)** : **aucune source externe** —
+  ce sont des conventions d'atelier et d'inventaire (chaînage de dates, comptabilité
+  de volumes, division euclidienne d'un volume en contenants), pas des modèles
+  physico-chimiques. Le présent document en est la **référence normative** ; les
+  valeurs de §13 sont des exemples de contrôle vérifiables par le calcul, pas des
+  mesures expérimentales. Les paramètres de pertes réutilisés (`deadspaceL`,
+  `transferLossL`, `evaporationRateLPerHour`) proviennent du profil d'équipement
+  décrit en §6 et ne sont pas redéfinis ici.
 
 > Le développeur doit **valider chaque formule contre au moins une recette documentée** avant de la considérer comme acquise (cf. exigence de tests du plan technique, §8).
 
