@@ -16,7 +16,7 @@ import { Loader2, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
 import { DeviationHint } from "@/features/day/DeviationHint";
-import { formatMeasurement } from "@/features/day/format";
+import { formatClock, formatMeasurement } from "@/features/day/format";
 import { useDayEvent } from "@/features/day/hooks";
 import { MEASUREMENT_LABELS } from "@/features/day/labels";
 import { modelTarget } from "@/features/day/model";
@@ -112,6 +112,9 @@ export function MeasurementEntry({
             <li key={`${m.kind}-${m.at}-${i}`} className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{MEASUREMENT_LABELS[m.kind]}</span>
               <span className="tabular-nums">{formatMeasurement(m.kind, m.value)}</span>
+              {/* Horodatage : une descente en température se lit dans la suite
+                  des relevés, pas dans le dernier seul (M9-11 §B). */}
+              <span className="tabular-nums text-muted-foreground">à {formatClock(m.at)}</span>
               <DeviationHint
                 kind={m.kind}
                 value={m.value}
