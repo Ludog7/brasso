@@ -368,6 +368,45 @@ function extractHopAdditions(snapshot: unknown): readonly RawHopAddition[] {
   return hops;
 }
 
+/**
+ * Répartit les échéances de houblonnage de l'ébullition entre les deux étapes
+ * issues de la scission d'assainissement (#264).
+ *
+ * Les offsets arrivent ici relatifs au **début de l'ébullition complète**. Ceux
+ * qui tombent avant la fin de l'ébullition raccourcie y restent tels quels ;
+ * les autres — typiquement le dernier aromatique et le **hors-flamme** —
+ * appartiennent à la fenêtre d'assainissement et sont **rebasés** sur le début
+ * de cette étape, faute de quoi leur alerte ne se déclencherait jamais : leur
+ * étape porteuse s'achèverait avant l'échéance.
+ *
+ * `remainingMin` n'est pas touché : c'est la convention d'écriture de la
+ * recette (temps d'ébullition **restant**), vraie quel que soit le découpage du
+ * plan. Seul l'offset, relatif à l'étape porteuse, se recalcule.
+ *
+ * Le tri (offset croissant, puis nom) est préservé : la partition conserve
+ * l'ordre et le rebasage translate les offsets d'une même constante.
+ *
+ * @param boilMin durée conservée par l'étape d'ébullition après scission
+ */
+function splitHopAdditions(
+  additions: readonly HopAdditionAlert[] | undefined,
+  boilMin: number,
+): { readonly boil: HopAdditionAlert[]; readonly sanitize: HopAdditionAlert[] } {
+  const boil: HopAdditionAlert[] = [];
+  const sanitize: HopAdditionAlert[] = [];
+  for (const addition of additions ?? []) {
+    if (addition.offsetFromStartMin < boilMin) {
+      boil.push(addition);
+    } else {
+      sanitize.push({
+        ...addition,
+        offsetFromStartMin: addition.offsetFromStartMin - boilMin,
+      });
+    }
+  }
+  return { boil, sanitize };
+}
+
 /** Tri stable et testable : offset croissant, à égalité par nom (comparaison binaire). */
 function byOffsetThenName(a: HopAdditionAlert, b: HopAdditionAlert): number {
   if (a.offsetFromStartMin !== b.offsetFromStartMin) {
@@ -384,9 +423,11 @@ function byOffsetThenName(a: HopAdditionAlert, b: HopAdditionAlert): number {
  * vaut mieux qu'un ajout silencieusement perdu.
  *
  * Les offsets sont relatifs au **début de l'étape de rattachement**. Appelée
- * **avant** {@link withSanitizeStep} : la scission de l'ébullition conserve son
- * début et sa durée totale, les offsets restent donc valides ; les échéances
- * suivent l'étape `BOIL` principale par recopie (spread).
+ * **avant** {@link withSanitizeStep}, donc calculés sur la durée **totale** de
+ * l'ébullition : c'est la scission qui les redistribue ensuite entre les deux
+ * étapes issues du découpage (#264). L'ordre est important — calculer les
+ * offsets après la scission les rapporterait à une ébullition amputée, et le
+ * hors-flamme se déclencherait en avance du délai d'assainissement.
  *
  * Sans étape d'ébullition de **durée connue**, aucun offset n'est calculable :
  * les ajouts d'ébullition ne sont pas dérivés (on n'invente pas de durée) ;
@@ -541,14 +582,25 @@ function withSanitizeStep(steps: readonly StepSpec[], leadMin: number | undefine
   if (boil === undefined) return result;
 
   const sanitizeMin = Math.min(leadMin, boilMin);
+  const remainingBoilMin = Math.max(0, boilMin - leadMin);
+
+  // Les échéances de houblonnage suivent la **fenêtre** où elles tombent (#264) :
+  // sans cette redistribution, le dernier aromatique et le hors-flamme restent
+  // accrochés à une ébullition qui s'achève avant eux, et leur alerte se perd.
+  const hops = splitHopAdditions(boil.hopAdditions, remainingBoilMin);
 
   // La prise de volume post-ébullition (M9-06) appartient à la **fin** de
   // l'ébullition : elle suit donc l'assainissement — dernière étape à feu vif —
   // plutôt que de rester sur un `boil-1` qui s'achève désormais plus tôt.
-  const { requiredMeasurements: boilMeasurements, ...boilWithoutMeasurements } = boil;
+  const {
+    requiredMeasurements: boilMeasurements,
+    hopAdditions: _movedHopAdditions,
+    ...boilWithoutMeasurements
+  } = boil;
   result[boilIndex] = {
     ...boilWithoutMeasurements,
-    plannedHoldMin: Math.max(0, boilMin - leadMin),
+    plannedHoldMin: remainingBoilMin,
+    ...(hops.boil.length > 0 ? { hopAdditions: hops.boil } : {}),
   };
   result.splice(boilIndex + 1, 0, {
     id: "boil-sanitize-1",
@@ -558,6 +610,7 @@ function withSanitizeStep(steps: readonly StepSpec[], leadMin: number | undefine
     plannedHoldMin: sanitizeMin,
     targetTempC: BOIL_TARGET_C,
     requiredMeasurements: boilMeasurements,
+    ...(hops.sanitize.length > 0 ? { hopAdditions: hops.sanitize } : {}),
   });
   return result;
 }

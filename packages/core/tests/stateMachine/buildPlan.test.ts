@@ -729,17 +729,117 @@ describe("M9-04 — alertes de houblonnage pendant l'ébullition", () => {
     });
   });
 
-  it("la scission d'assainissement (M9-03) conserve les échéances sur l'étape d'ébullition", () => {
-    const plan = buildDayPlan({
-      recipeSnapshot: snapshotWithHops([hop("Magnum", "BOIL", 60), hop("Citra", "BOIL", 0)]),
-      coolingCircuitSanitizeLeadMin: 5,
+  describe("scission d'assainissement : les échéances suivent leur fenêtre (#264)", () => {
+    it("critère observable : ébullition 60 min, délai 5 min, ajouts 60/5/0 → l'aromatique et le hors-flamme passent sur l'assainissement", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([
+          hop("Magnum", "BOIL", 60),
+          hop("Cascade", "BOIL", 5),
+          hop("Citra", "BOIL", 0),
+        ]),
+        coolingCircuitSanitizeLeadMin: 5,
+      });
+      const map = byId(plan);
+      expect(map["boil-1"]?.plannedHoldMin).toBe(55);
+
+      // Seul l'amérisant tombe dans l'ébullition raccourcie.
+      expect(map["boil-1"]?.hopAdditions).toEqual([
+        {
+          name: "Magnum",
+          amountG: 20,
+          nature: "BITTERING",
+          remainingMin: 60,
+          offsetFromStartMin: 0,
+          inconsistent: false,
+        },
+      ]);
+
+      // Les deux autres tombent dans la fenêtre d'assainissement, offsets rebasés
+      // sur son démarrage. Sans cela, leur alerte ne pourrait jamais se déclencher :
+      // l'étape porteuse s'achèverait avant l'échéance.
+      expect(map["boil-sanitize-1"]?.hopAdditions).toEqual([
+        {
+          name: "Cascade",
+          amountG: 20,
+          nature: "AROMA",
+          remainingMin: 5,
+          offsetFromStartMin: 0,
+          inconsistent: false,
+        },
+        {
+          name: "Citra",
+          amountG: 20,
+          nature: "FLAME_OUT",
+          remainingMin: 0,
+          offsetFromStartMin: 5,
+          inconsistent: false,
+        },
+      ]);
     });
-    const map = byId(plan);
-    expect(map["boil-1"]?.plannedHoldMin).toBe(55);
-    // Les offsets restent relatifs au début de l'ébullition : la scission
-    // conserve le début et la durée totale (55 + 5 = 60).
-    expect(map["boil-1"]?.hopAdditions?.map((a) => a.offsetFromStartMin)).toEqual([0, 60]);
-    expect(map["boil-sanitize-1"]?.hopAdditions).toBeUndefined();
+
+    it("`remainingMin` n'est pas rebasé : c'est la convention de la recette, pas une position dans le plan", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([hop("Citra", "BOIL", 0)]),
+        coolingCircuitSanitizeLeadMin: 5,
+      });
+      const moved = byId(plan)["boil-sanitize-1"]?.hopAdditions?.[0];
+      expect(moved?.remainingMin).toBe(0);
+      expect(moved?.offsetFromStartMin).toBe(5);
+    });
+
+    it("non-régression M9-04 : sans assainissement, les échéances restent intactes sur l'ébullition", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([hop("Magnum", "BOIL", 60), hop("Citra", "BOIL", 0)]),
+      });
+      const map = byId(plan);
+      expect(map["boil-1"]?.hopAdditions?.map((a) => a.offsetFromStartMin)).toEqual([0, 60]);
+      expect(map["boil-sanitize-1"]).toBeUndefined();
+    });
+
+    it("ébullition plus courte que le délai : toutes les échéances passent sur l'assainissement, offsets inchangés", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops(
+          [hop("Magnum", "BOIL", 10), hop("Citra", "BOIL", 0)],
+          [step("BOIL", { timeMin: 10 }), step("COOL", { targetTempC: 20 })],
+        ),
+        coolingCircuitSanitizeLeadMin: 15,
+      });
+      const map = byId(plan);
+      // L'ébullition tombe à 0 : le rebasage translate d'une durée nulle.
+      expect(map["boil-1"]?.plannedHoldMin).toBe(0);
+      expect(map["boil-1"]?.hopAdditions).toBeUndefined();
+      expect(map["boil-sanitize-1"]?.hopAdditions?.map((a) => a.offsetFromStartMin)).toEqual([
+        0, 10,
+      ]);
+    });
+
+    it("le tri (offset croissant, puis nom) est préservé de part et d'autre de la scission", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([
+          hop("Zeus", "BOIL", 2),
+          hop("Amarillo", "BOIL", 2),
+          hop("Simcoe", "BOIL", 30),
+          hop("Magnum", "BOIL", 60),
+        ]),
+        coolingCircuitSanitizeLeadMin: 5,
+      });
+      const map = byId(plan);
+      expect(map["boil-1"]?.hopAdditions?.map((a) => a.name)).toEqual(["Magnum", "Simcoe"]);
+      expect(map["boil-sanitize-1"]?.hopAdditions?.map((a) => a.name)).toEqual([
+        "Amarillo",
+        "Zeus",
+      ]);
+    });
+
+    it("une ébullition sans houblon ne dote l'assainissement d'aucune échéance vide", () => {
+      const plan = buildDayPlan({
+        recipeSnapshot: snapshotWithHops([]),
+        coolingCircuitSanitizeLeadMin: 5,
+      });
+      const map = byId(plan);
+      expect(map["boil-1"]?.hopAdditions).toBeUndefined();
+      expect(map["boil-sanitize-1"]?.hopAdditions).toBeUndefined();
+    });
   });
 });
 
