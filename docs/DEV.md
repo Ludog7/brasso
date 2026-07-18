@@ -132,4 +132,19 @@ l'ordre** (reproductibles en local pour éviter un aller-retour) :
   `transition(state, event)` **pur, serveur autoritaire** (ADR-08) →
   `phaseToDayPhase` pour la persistance (`DayPhase` Prisma).
 - **RBAC deny-by-default** : matrice (ressource, action) dans `apps/api/src/rbac/matrix.ts`.
+- **Front perf & PWA offline (M8-07)** : les pages sont **chargées à la demande**
+  (`App.tsx` = `React.lazy` + `<Suspense>`, un chunk par route). Le bundle initial
+  se limite au socle (vendor React + router + query + shell ≈ **252 kB / ~81 kB
+  gzip** — avant split : un seul chunk **679 kB**). **Budget** = `build.chunkSizeWarningLimit:
+  300` dans `apps/web/vite.config.ts` : une régression de poids (retour à un bundle
+  monolithique) redéclenche l'avertissement Vite. **Offline (ADR-08)** : `vite-plugin-pwa`
+  (workbox `generateSW`) précache **tous** les chunks émis (`globPatterns` `**/*.js`,
+  y compris `DayScreen-*.js`) et pose `navigateFallback: index.html` → un rechargement
+  hors ligne sur une route profonde sert le shell depuis le cache, puis l'`import()`
+  du chunk de route résout depuis le précache. La **file d'actions offline** du Jour J
+  (M4-14, IndexedDB) rejoue à la reconnexion.
+  **Vérifier l'offline** : `pnpm --filter @brasso/web build && pnpm --filter @brasso/web preview`,
+  ouvrir le Jour J d'un batch (SW installé), passer l'onglet **hors ligne**
+  (DevTools › Network › Offline), **recharger** (le shell revient), dérouler une
+  étape (l'action est mise en file), repasser **en ligne** → resynchronisation.
 ```
