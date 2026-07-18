@@ -10,6 +10,7 @@ import {
   batchStatusSchema,
   cycleDurationDaysSchema,
   measureTypeSchema,
+  packagingLineSchema,
 } from "@brasso/core";
 import { z } from "zod";
 
@@ -89,6 +90,52 @@ export const milestonePatchBody = z
     message: "Aucun champ à ajuster : fournir une durée ou une date réelle.",
   });
 export type MilestonePatchBody = z.infer<typeof milestonePatchBody>;
+
+/**
+ * Ligne de conditionnement saisie (`POST /api/batches/:id/packaging`, M9-08).
+ * Le volume unitaire est celui **réellement rempli**, pas la contenance nominale
+ * du catalogue. `containerItemId` absent = contenant non suivi en stock : aucune
+ * sortie de stock ne sera écrite pour lui.
+ */
+const packagingLineBody = packagingLineSchema.extend({
+  containerItemId: z.string().min(1).optional(),
+});
+
+/** Corps d'un conditionnement : au moins une ligne de contenants. */
+export const packagingRecordBody = z.object({
+  lines: z.array(packagingLineBody).min(1),
+  /** Nom de l'article produit fini ; à défaut, dérivé du numéro de brassin. */
+  productName: z.string().min(1).optional(),
+  note: z.string().min(1).optional(),
+});
+export type PackagingRecordBody = z.infer<typeof packagingRecordBody>;
+
+/**
+ * Correction d'un conditionnement (`POST /api/batches/:id/packaging/corrections`).
+ * Le registre étant append-only, on écrit un **mouvement inverse** : `delta`
+ * signé, non nul, et un motif **obligatoire** — une correction sans motif est
+ * intraçable.
+ */
+export const packagingCorrectionBody = z.object({
+  /** Article à corriger ; à défaut, le produit fini du brassin. */
+  catalogItemId: z.string().min(1).optional(),
+  delta: z
+    .number()
+    .finite()
+    .refine((d) => d !== 0, { message: "Le delta doit être non nul." }),
+  note: z.string().min(1),
+});
+export type PackagingCorrectionBody = z.infer<typeof packagingCorrectionBody>;
+
+/**
+ * Aide à la saisie (`POST /api/batches/:id/packaging:split`) : propose une
+ * répartition d'un volume en contenants (FORMULES §13.3). Ne écrit rien.
+ */
+export const packagingSplitQuery = z.object({
+  volumeL: z.number().finite(),
+  containers: z.array(z.object({ id: z.string().min(1), volumeL: z.number().finite() })).min(1),
+});
+export type PackagingSplitQuery = z.infer<typeof packagingSplitQuery>;
 
 /**
  * Paramètres du coût de revient (`GET /api/batches/:id/cost`) : imputation bulk
