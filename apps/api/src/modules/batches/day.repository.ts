@@ -19,6 +19,16 @@ export interface DayStartContext {
   recipeSnapshot: unknown;
   /** Champs du profil d'équipement utiles aux rampes (ou `null` si aucun profil). */
   equipment: PlanEquipment | null;
+  /**
+   * Délai (min avant le hors-flamme) de l'**assainissement du circuit de
+   * refroidissement**, lu des `Settings` (M9-02).
+   *
+   * Lu ici parce que `core` n'en code aucune valeur par défaut (ADR-01) et
+   * n'en dérive l'étape **que** si l'appelant le fournit. Il ne l'était pas
+   * (#276) : l'étape n'apparaissait dans aucun Jour J, emportant avec elle sa
+   * consigne d'écran et son disclaimer ADR-11.
+   */
+  coolingCircuitSanitizeLeadMin: number;
 }
 
 /** Session Jour J persistée + statut courant du batch. */
@@ -197,14 +207,17 @@ export class PrismaBatchDayRepository implements DayRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async getStartContext(batchId: string): Promise<DayStartContext | null> {
-    const batch = await this.prisma.batch.findUnique({
-      where: { id: batchId },
-      select: {
-        status: true,
-        recipeSnapshot: true,
-        equipmentProfile: { select: { heatingPowerKw: true, thermalMassKjPerC: true } },
-      },
-    });
+    const [batch, settings] = await Promise.all([
+      this.prisma.batch.findUnique({
+        where: { id: batchId },
+        select: {
+          status: true,
+          recipeSnapshot: true,
+          equipmentProfile: { select: { heatingPowerKw: true, thermalMassKjPerC: true } },
+        },
+      }),
+      this.prisma.settings.findFirst({ select: { coolingCircuitSanitizeLeadMin: true } }),
+    ]);
     if (!batch) return null;
     return {
       status: batch.status,
@@ -215,6 +228,10 @@ export class PrismaBatchDayRepository implements DayRepository {
             thermalMassKjPerC: batch.equipmentProfile.thermalMassKjPerC,
           }
         : null,
+      // Même valeur que le `@default` du schéma : une instance sans ligne
+      // `Settings` garde son étape d'assainissement plutôt que de la perdre en
+      // silence — c'est une étape de sécurité alimentaire.
+      coolingCircuitSanitizeLeadMin: settings?.coolingCircuitSanitizeLeadMin ?? 5,
     };
   }
 

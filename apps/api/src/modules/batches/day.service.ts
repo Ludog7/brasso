@@ -213,6 +213,9 @@ export class BatchDayService {
     const plan = buildDayPlan({
       recipeSnapshot: ctx.recipeSnapshot,
       equipment: ctx.equipment ?? undefined,
+      // Sans ce paramètre, `core` ne dérive **aucune** étape d'assainissement
+      // (il refuse de supposer un délai, ADR-01) — cf. #276.
+      coolingCircuitSanitizeLeadMin: ctx.coolingCircuitSanitizeLeadMin,
     });
     const state = initDayState(plan);
     const phase = phaseToDayPhase(currentStep(state)?.phase ?? null);
