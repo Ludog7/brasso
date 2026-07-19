@@ -7,7 +7,9 @@
  * - un **profil d'équipement** actif ;
  * - une **recette BEER publiée** (aucune règle de publication `core` sur BEER)
  *   avec un ingrédient catalogué (→ réservation de stock) et des étapes qui
- *   produisent un plan Jour J court : empâtage → ébullition → fermentation ;
+ *   produisent le plan Jour J **complet** de M9 : empâtage → filtration →
+ *   ébullition → assainissement du circuit → whirlpool → refroidissement →
+ *   ensemencement (M9-14) ;
  * - un **mouvement de stock** d'appro pour couvrir la réservation (pas d'alerte) ;
  * - (M8-06, hub caisse) un **article conditionné** + stock + **mapping SKU** SumUp ;
  * - (M8-06, adhésion) un **membre** `EN_RETARD` rapprochable par email HelloAsso.
@@ -40,6 +42,24 @@ import {
  * et au seed de base : le hash produit ici doit être vérifiable au login.
  */
 const ARGON2_OPTIONS = { memoryCost: 19_456, timeCost: 2, parallelism: 1 } as const;
+
+/**
+ * Durée d'ébullition (min) de la recette de parcours — **le plus court possible**.
+ *
+ * `buildDayPlan` scinde l'ébullition pour y loger l'assainissement du circuit :
+ * `boil` garde `durée − délai`, l'assainissement tient les `délai` dernières
+ * minutes. Avec `SANITIZE_LEAD_MIN = 1`, l'ébullition tombe à 0 min (validable
+ * aussitôt) et l'assainissement arme un palier d'**une** minute.
+ *
+ * C'est le plancher : `timeMin` et `coolingCircuitSanitizeLeadMin` sont des
+ * **entiers** (`z.number().int()`, colonne `Int`), et un palier de 0 min des deux
+ * côtés ferait disparaître le seul timer réel du parcours. Le test attend donc
+ * que le bouton s'active — jamais une temporisation fixe (M9-14 §D).
+ */
+const BOIL_TIME_MIN = 1;
+
+/** Délai d'assainissement (min) — ramené à 1 pour le parcours (défaut produit : 5). */
+const SANITIZE_LEAD_MIN = 1;
 
 /** Crée (ou met à jour) le compte de test et l'affecte à son rôle RBAC. */
 async function seedAccount(account: Account): Promise<void> {
@@ -121,15 +141,42 @@ async function seedPublishedRecipe(): Promise<void> {
             sortOrder: 0,
             params: { colorEbc: 3.5, potentialSg: 1.037, isMashable: true },
           },
+          // Houblons : `timeMinutes` = temps d'ébullition **restant** (FORMULES
+          // §4.3). Calés sur l'ébullition raccourcie ci-dessous — un temps
+          // restant supérieur à la durée d'ébullition serait marqué incohérent
+          // par `buildDayPlan`, et le parcours nominal afficherait un défaut.
           {
             name: "Houblon Saaz (hors catalogue)",
             category: "HOP",
             use: "BOIL",
             amount: 40,
             unit: "GRAM",
-            timeMinutes: 60,
+            timeMinutes: BOIL_TIME_MIN,
             sortOrder: 1,
             params: { alphaFraction: 0.035, form: "pellet" },
+          },
+          {
+            // Temps restant nul ⇒ **hors-flamme** : l'ajout que #264 perdait
+            // dans la scission d'assainissement (cf. `brassage.spec.ts`).
+            name: "Houblon Citra (hors-flamme)",
+            category: "HOP",
+            use: "BOIL",
+            amount: 20,
+            unit: "GRAM",
+            timeMinutes: 0,
+            sortOrder: 2,
+            params: { alphaFraction: 0.12, form: "pellet" },
+          },
+          {
+            // Dry hop : sans effet sur le Jour J (M9-04 l'ignore), mais il rend
+            // le champ « Dry hop » visible à la saisie des durées (M9-12 §C).
+            name: "Houblon Cascade (dry hop)",
+            category: "HOP",
+            use: "DRY_HOP",
+            amount: 30,
+            unit: "GRAM",
+            sortOrder: 3,
+            params: { alphaFraction: 0.06, form: "pellet" },
           },
           {
             name: "Levure US-05",
@@ -137,22 +184,29 @@ async function seedPublishedRecipe(): Promise<void> {
             use: "PRIMARY",
             amount: 11.5,
             unit: "GRAM",
-            sortOrder: 2,
+            sortOrder: 4,
             params: {},
           },
         ],
       },
       steps: {
-        // MASH sans `timeMin` → pas de timer de palier (stabilisation puis validation
-        // directe). BOIL exige `timeMin` mais le parcours s'arrête avant de l'armer.
+        // Étapes choisies pour produire le plan Jour J **complet** de M9 :
+        // filtration (`SPARGE`), whirlpool et refroidissement (`COOL`) — ce
+        // dernier conditionnant la dérivation de l'assainissement du circuit.
+        //
+        // MASH et WHIRLPOOL sont sans `timeMin` → aucun timer de palier.
+        // `BOIL` en exige un : cf. {@link BOIL_TIME_MIN}.
         create: [
           { type: "MASH", name: "Empâtage mono-palier", params: { tempC: 67 }, sortOrder: 0 },
-          { type: "BOIL", name: "Ébullition", params: { timeMin: 60 }, sortOrder: 1 },
+          { type: "SPARGE", name: "Filtration / rinçage", params: { tempC: 78 }, sortOrder: 1 },
+          { type: "BOIL", name: "Ébullition", params: { timeMin: BOIL_TIME_MIN }, sortOrder: 2 },
+          { type: "WHIRLPOOL", name: "Whirlpool", params: { tempC: 90 }, sortOrder: 3 },
+          { type: "COOL", name: "Refroidissement", params: { targetTempC: 20 }, sortOrder: 4 },
           {
             type: "FERMENT",
             name: "Fermentation primaire",
             params: { tempC: 20, days: 14 },
-            sortOrder: 2,
+            sortOrder: 5,
           },
         ],
       },
@@ -237,11 +291,26 @@ async function seedMember(): Promise<void> {
   });
 }
 
+/**
+ * Raccourcit le délai d'assainissement du circuit (M9-02) pour le parcours.
+ *
+ * Ce délai est un paramètre d'instance, pas une constante : le ramener à 1 min
+ * ne modifie que la base de test. Il reste **strictement positif**, condition
+ * pour que `buildDayPlan` dérive l'étape d'assainissement — que le parcours doit
+ * traverser (M9-14 §A, §C).
+ */
+async function seedCycleSettings(): Promise<void> {
+  await prisma.settings.updateMany({
+    data: { coolingCircuitSanitizeLeadMin: SANITIZE_LEAD_MIN },
+  });
+}
+
 /** Point d'entrée : amorce l'ensemble des données de parcours E2E. */
 export async function seedE2E(): Promise<void> {
   for (const account of Object.values(ACCOUNTS)) {
     await seedAccount(account);
   }
+  await seedCycleSettings();
   await seedEquipment();
   await seedPublishedRecipe();
   await seedStock();
