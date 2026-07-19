@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { PrismaClient } from "@brasso/db";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -25,6 +26,7 @@ import type {
   DeviationRecord,
   MeasureEffect,
 } from "../src/modules/batches/day.repository.js";
+import { PrismaBatchDayRepository } from "../src/modules/batches/day.repository.js";
 import { SESSION_COOKIE } from "../src/plugins/auth.js";
 
 const config: AppConfig = {
@@ -185,6 +187,14 @@ class InMemoryDayRepository implements DayRepository {
   }
 }
 
+/**
+ * Délai d'assainissement du circuit (min) des contextes de test — reflète ce que
+ * `getStartContext` lit des `Settings` (#276). Sans lui, `buildDayPlan` ne
+ * dérive aucune étape d'assainissement, et le plan des tests divergerait de
+ * celui de l'application.
+ */
+const SANITIZE_LEAD_MIN = 5;
+
 /** Snapshot minimal : buildDayPlan ne lit que `steps`. Brassin BEER complet. */
 const RECIPE_SNAPSHOT = {
   id: "rec-1",
@@ -272,6 +282,7 @@ describe("module batches — session Jour J : démarrer & charger (M4-04)", () =
       status: "PLANIFIE",
       recipeSnapshot: RECIPE_SNAPSHOT,
       equipment: null,
+      coolingCircuitSanitizeLeadMin: SANITIZE_LEAD_MIN,
       ...over,
     });
 
@@ -291,12 +302,16 @@ describe("module batches — session Jour J : démarrer & charger (M4-04)", () =
       expect(session.revision).toBe(0);
       expect(session.state.cursor).toBe(0);
       expect(session.state.status).toBe("PENDING");
-      // Plan dérivé du snapshot (M4-01), jalon init en tête.
+      // Plan dérivé du snapshot (M4-01), jalon init en tête. L'**assainissement
+      // du circuit** (M9-03) y figure : il est dérivé du délai lu des `Settings`
+      // et transmis à `buildDayPlan` — ce que l'API omettait (#276), si bien
+      // que l'étape n'apparaissait dans aucun Jour J.
       expect(session.plan.map((s: { id: string }) => s.id)).toEqual([
         "init",
         "mash-1",
         "lauter-1",
         "boil-1",
+        "boil-sanitize-1",
         "cooling-1",
         "pitching-1",
       ]);
@@ -304,6 +319,43 @@ describe("module batches — session Jour J : démarrer & charger (M4-04)", () =
     } finally {
       await close();
     }
+  });
+
+  /**
+   * #276 : le délai des `Settings` n'était pas transmis à `buildDayPlan`, et
+   * l'étape d'assainissement du circuit n'apparaissait **dans aucun** Jour J —
+   * emportant avec elle sa consigne d'écran et son disclaimer ADR-11.
+   */
+  describe("assainissement du circuit : le délai vient des `Settings` (#276)", () => {
+    it("scinde l'ébullition en conservant le temps total à feu vif", async () => {
+      try {
+        seed("b1");
+        const { day: session } = (await start("b1")).json();
+        const byId = (id: string) =>
+          session.plan.find((s: { id: string }) => s.id === id) as { plannedHoldMin?: number };
+
+        // Ébullition de 60 min, délai de 5 min : 55 + 5, et non 60 + 5.
+        expect(byId("boil-1").plannedHoldMin).toBe(60 - SANITIZE_LEAD_MIN);
+        expect(byId("boil-sanitize-1").plannedHoldMin).toBe(SANITIZE_LEAD_MIN);
+      } finally {
+        await close();
+      }
+    });
+
+    it("un délai à 0 ne dérive aucune étape : on ne l'invente pas", async () => {
+      try {
+        seed("b1", { coolingCircuitSanitizeLeadMin: 0 });
+        const { day: session } = (await start("b1")).json();
+
+        const ids = session.plan.map((s: { id: string }) => s.id);
+        expect(ids).not.toContain("boil-sanitize-1");
+        // L'ébullition garde alors sa durée entière.
+        const boil = session.plan.find((s: { id: string }) => s.id === "boil-1");
+        expect(boil.plannedHoldMin).toBe(60);
+      } finally {
+        await close();
+      }
+    });
   });
 
   it("idempotent : un second start renvoie la session existante (200, non recréée)", async () => {
@@ -340,7 +392,8 @@ describe("module batches — session Jour J : démarrer & charger (M4-04)", () =
       const res = await load("b1");
       expect(res.statusCode).toBe(200);
       const { day: session } = res.json();
-      expect(session.plan).toHaveLength(6);
+      // 7 étapes : init + 5 de la recette + l'assainissement dérivé (#276).
+      expect(session.plan).toHaveLength(7);
       expect(session.state.status).toBe("PENDING");
       expect(session.timings.stepId).toBe("init");
       expect(session.phase).toBe("INITIALISATION");
@@ -403,7 +456,12 @@ describe("module batches — session Jour J : appliquer un événement (M4-05)",
   beforeEach(async () => {
     day = new InMemoryDayRepository();
     ({ app, cookieFor } = await makeApp(day));
-    day.seedBatch("b1", { status: "PLANIFIE", recipeSnapshot: RECIPE_SNAPSHOT, equipment: null });
+    day.seedBatch("b1", {
+      status: "PLANIFIE",
+      recipeSnapshot: RECIPE_SNAPSHOT,
+      equipment: null,
+      coolingCircuitSanitizeLeadMin: SANITIZE_LEAD_MIN,
+    });
   });
   const close = async (): Promise<void> => {
     await app.close();
@@ -555,9 +613,10 @@ describe("module batches — session Jour J : appliquer un événement (M4-05)",
   it("dérouler jusqu'à l'ensemencement clôt le brassin en EN_FERMENTATION (TERMINE)", async () => {
     try {
       await start();
-      // 6 étapes (init → … → pitching-1) forcées : la dernière clôt le Jour J.
+      // 7 étapes (init → … → pitching-1, assainissement compris) forcées :
+      // la dernière clôt le Jour J.
       let last;
-      for (let i = 1; i <= 6; i++) last = await force(i * 1000);
+      for (let i = 1; i <= 7; i++) last = await force(i * 1000);
       expect(last?.statusCode).toBe(200);
       expect(last?.json().day.batchStatus).toBe("EN_FERMENTATION");
       expect(last?.json().day.phase).toBe("TERMINE");
@@ -600,7 +659,12 @@ describe("module batches — session Jour J : rejeu de la file offline (M4-06)",
   beforeEach(async () => {
     day = new InMemoryDayRepository();
     ({ app, cookieFor } = await makeApp(day));
-    day.seedBatch("b1", { status: "PLANIFIE", recipeSnapshot: RECIPE_SNAPSHOT, equipment: null });
+    day.seedBatch("b1", {
+      status: "PLANIFIE",
+      recipeSnapshot: RECIPE_SNAPSHOT,
+      equipment: null,
+      coolingCircuitSanitizeLeadMin: SANITIZE_LEAD_MIN,
+    });
   });
   const close = async (): Promise<void> => {
     await app.close();
@@ -689,6 +753,8 @@ describe("module batches — session Jour J : rejeu de la file offline (M4-06)",
   it("rejouer deux fois la même file laisse le batch dans le même état (démo offline)", async () => {
     try {
       await start();
+      // Une entrée par étape du plan (7 depuis #276 : l'assainissement du
+      // circuit s'intercale dans l'ébullition).
       const file = [
         forceEvt("e1", 1000),
         forceEvt("e2", 2000),
@@ -696,6 +762,7 @@ describe("module batches — session Jour J : rejeu de la file offline (M4-06)",
         forceEvt("e4", 4000),
         forceEvt("e5", 5000),
         forceEvt("e6", 6000),
+        forceEvt("e7", 7000),
       ];
       const first = await sync(file);
       expect(first.json().day.batchStatus).toBe("EN_FERMENTATION");
@@ -709,7 +776,7 @@ describe("module batches — session Jour J : rejeu de la file offline (M4-06)",
       ).toBe(true);
       const stateAfterSecond = (await load()).json().day.state;
       expect(stateAfterSecond).toEqual(stateAfterFirst);
-      expect(day.deviations).toHaveLength(6); // pas de doublon
+      expect(day.deviations).toHaveLength(7); // un par étape, pas de doublon
     } finally {
       await close();
     }
@@ -726,7 +793,12 @@ describe("module batches — session Jour J : rejeu de la file offline (M4-06)",
       const synced = (await sync(events)).json().day;
 
       // Rejeu en ligne équivalent sur un second batch.
-      day.seedBatch("b2", { status: "PLANIFIE", recipeSnapshot: RECIPE_SNAPSHOT, equipment: null });
+      day.seedBatch("b2", {
+        status: "PLANIFIE",
+        recipeSnapshot: RECIPE_SNAPSHOT,
+        equipment: null,
+        coolingCircuitSanitizeLeadMin: SANITIZE_LEAD_MIN,
+      });
       await inject(app, "POST", "/api/batches/b2/day/start", { cookie: cookieFor("brasseur") });
       const online = (u: unknown): ReturnType<FastifyInstance["inject"]> =>
         inject(app, "POST", "/api/batches/b2/day/events", {
@@ -903,5 +975,44 @@ describe("module batches — session Jour J : corrections densité pré-ébullit
     } finally {
       await close();
     }
+  });
+});
+
+/**
+ * Repli du repository Prisma (#276) : une instance **sans ligne `Settings`**
+ * garde son étape d'assainissement. Testé sur le repository lui-même, seul
+ * endroit qui connaisse le `@default` du schéma — le dupliquer ailleurs ferait
+ * diverger deux valeurs par défaut.
+ */
+describe("PrismaBatchDayRepository.getStartContext — délai d'assainissement", () => {
+  const repositoryWith = (settings: unknown) =>
+    new PrismaBatchDayRepository({
+      batch: {
+        findUnique: () =>
+          Promise.resolve({
+            status: "PLANIFIE",
+            recipeSnapshot: RECIPE_SNAPSHOT,
+            equipmentProfile: null,
+          }),
+      },
+      settings: { findFirst: () => Promise.resolve(settings) },
+    } as unknown as PrismaClient);
+
+  it("aucune ligne `Settings` → valeur par défaut du schéma (5 min)", async () => {
+    const ctx = await repositoryWith(null).getStartContext("b1");
+    expect(ctx?.coolingCircuitSanitizeLeadMin).toBe(5);
+  });
+
+  it("ligne présente → sa valeur, y compris 0 (étape désactivée)", async () => {
+    const ctx = await repositoryWith({ coolingCircuitSanitizeLeadMin: 0 }).getStartContext("b1");
+    expect(ctx?.coolingCircuitSanitizeLeadMin).toBe(0);
+  });
+
+  it("brassin inexistant → `null`, sans lecture de `Settings` fatale", async () => {
+    const repo = new PrismaBatchDayRepository({
+      batch: { findUnique: () => Promise.resolve(null) },
+      settings: { findFirst: () => Promise.resolve(null) },
+    } as unknown as PrismaClient);
+    await expect(repo.getStartContext("inconnu")).resolves.toBeNull();
   });
 });
