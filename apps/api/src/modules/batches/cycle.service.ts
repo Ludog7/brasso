@@ -78,6 +78,20 @@ export interface MilestoneApiView extends MilestoneView {
   completed: boolean;
 }
 
+/**
+ * Défauts de cycle applicables à un brassin (M9-16), tels que l'écran de fin
+ * d'ensemencement doit les pré-remplir.
+ *
+ * Batch-scopé et non global, parce que `hasDryHop` en fait partie : la saisie
+ * n'affiche le champ dry hop que si la **recette figée du brassin** en porte un
+ * (M9-12 §C). L'exposer ici évite que le front réanalyse le `recipeSnapshot` et
+ * en produise une variante divergente de celle de `core`.
+ */
+export interface CycleDefaultsView extends CycleDefaults {
+  /** La recette figée du brassin porte-t-elle un houblon en `use = DRY_HOP` ? */
+  hasDryHop: boolean;
+}
+
 /** Réponse de création : les jalons, et si la séquence préexistait (rejeu offline). */
 export interface MilestonesCreateResult {
   milestones: MilestoneApiView[];
@@ -164,6 +178,23 @@ export class BatchCycleService {
     private readonly cycle: BatchCycleRepository,
     private readonly batches: BatchRepository,
   ) {}
+
+  /**
+   * Défauts de cycle applicables à un brassin : fuseau de l'instance, quatre
+   * durées prévisionnelles et présence d'un dry hop dans sa recette figée.
+   *
+   * Lecture seule, destinée à **pré-remplir** la saisie de fin d'ensemencement
+   * et à en calculer l'aperçu daté côté front (`buildBatchMilestones` de `core`,
+   * appelé avec ce fuseau — jamais celui du navigateur). Les valeurs de repli
+   * ne sont pas dupliquées ici : elles viennent de `cycleDefaults()`, seul
+   * endroit qui connaisse les `@default` du schéma.
+   */
+  async cycleDefaults(batchId: string): Promise<CycleDefaultsView> {
+    const batch = await this.batches.findById(batchId);
+    if (!batch) throw new BatchNotFoundError(batchId);
+    const defaults = await this.cycle.cycleDefaults();
+    return { ...defaults, hasDryHop: recipeHasDryHop(batch.recipeSnapshot) };
+  }
 
   /**
    * Crée la séquence de jalons à la validation de l'ensemencement.

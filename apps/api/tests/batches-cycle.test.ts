@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { BatchStatus, MeasureType } from "@brasso/core";
+import type { PrismaClient } from "@brasso/db";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -19,6 +20,7 @@ import type {
   MilestoneView,
   MilestoneWriteData,
 } from "../src/modules/batches/cycle.repository.js";
+import { PrismaBatchCycleRepository } from "../src/modules/batches/cycle.repository.js";
 import type {
   BatchCostInputs,
   BatchCreateData,
@@ -472,6 +474,110 @@ describe("GET /api/batches/:id/milestones", () => {
   });
 });
 
+describe("GET /api/batches/:id/cycle-defaults — pré-remplissage de la saisie (M9-16)", () => {
+  it("restitue le fuseau de l'instance et les quatre durées", async () => {
+    const res = await inject(app, "GET", "/api/batches/batch_1/cycle-defaults", {
+      cookie: cookieFor("brasseur"),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().defaults).toMatchObject({
+      timezone: "Europe/Paris",
+      fermentationDays: 14,
+      dryHopDays: 3,
+      coldCrashDays: 2,
+      gardeDays: 21,
+    });
+  });
+
+  it("suit les `Settings` de l'instance plutôt que des constantes figées", async () => {
+    cycle.setDefaults({ timezone: "Indian/Reunion", gardeDays: 30, fermentationDays: 10 });
+    const res = await inject(app, "GET", "/api/batches/batch_1/cycle-defaults", {
+      cookie: cookieFor("brasseur"),
+    });
+    expect(res.json().defaults).toMatchObject({
+      timezone: "Indian/Reunion",
+      gardeDays: 30,
+      fermentationDays: 10,
+    });
+  });
+
+  // Le front n'a pas à réanalyser le `recipeSnapshot` (M9-12 §C) : la présence
+  // d'un dry hop est décidée ici, par le même helper `core` que la création de
+  // la séquence — sans quoi le champ pourrait s'afficher et le jalon manquer.
+  it("dit `hasDryHop: false` quand la recette n'en porte pas", async () => {
+    const res = await inject(app, "GET", "/api/batches/batch_1/cycle-defaults", {
+      cookie: cookieFor("brasseur"),
+    });
+    expect(res.json().defaults.hasDryHop).toBe(false);
+  });
+
+  it("dit `hasDryHop: true` quand la recette figée en porte un", async () => {
+    batches.seed(batchFixture({ id: "batch_dh", recipeSnapshot: snapshotWithDryHop }));
+    const res = await inject(app, "GET", "/api/batches/batch_dh/cycle-defaults", {
+      cookie: cookieFor("brasseur"),
+    });
+    expect(res.json().defaults.hasDryHop).toBe(true);
+  });
+
+  it("s'accorde avec la séquence réellement créée pour le même brassin", async () => {
+    batches.seed(batchFixture({ id: "batch_dh", recipeSnapshot: snapshotWithDryHop }));
+    const defaults = await inject(app, "GET", "/api/batches/batch_dh/cycle-defaults", {
+      cookie: cookieFor("brasseur"),
+    });
+    const created = await createMilestones({ pitchedAt: "2026-03-01T00:00:00+01:00" }, "batch_dh");
+
+    const kinds = created.json().milestones.map((m: { kind: string }) => m.kind);
+    expect(kinds.includes("DRY_HOP")).toBe(defaults.json().defaults.hasDryHop);
+  });
+
+  it("brassin inexistant → 404", async () => {
+    const res = await inject(app, "GET", "/api/batches/inconnu/cycle-defaults", {
+      cookie: cookieFor("brasseur"),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+/**
+ * Repli du repository Prisma : une instance **sans ligne `Settings`** doit rester
+ * exploitable. Testé sur le repository lui-même parce que c'est le seul endroit
+ * qui connaisse les `@default` du schéma — les dupliquer ailleurs (service,
+ * front) ferait diverger deux jeux de valeurs par défaut.
+ */
+describe("PrismaBatchCycleRepository.cycleDefaults — repli sans `Settings`", () => {
+  const repositoryWith = (settings: unknown) =>
+    new PrismaBatchCycleRepository({
+      settings: { findFirst: () => Promise.resolve(settings) },
+    } as unknown as PrismaClient);
+
+  it("aucune ligne `Settings` → valeurs par défaut du schéma", async () => {
+    await expect(repositoryWith(null).cycleDefaults()).resolves.toEqual({
+      timezone: "Europe/Paris",
+      fermentationDays: 14,
+      dryHopDays: 3,
+      coldCrashDays: 2,
+      gardeDays: 21,
+    });
+  });
+
+  it("ligne présente → ses valeurs, `defaultConditioningDays` portant la garde", async () => {
+    const repo = repositoryWith({
+      timezone: "Indian/Reunion",
+      defaultFermentationDays: 10,
+      defaultDryHopDays: 5,
+      defaultColdCrashDays: 1,
+      defaultConditioningDays: 30,
+    });
+    await expect(repo.cycleDefaults()).resolves.toEqual({
+      timezone: "Indian/Reunion",
+      fermentationDays: 10,
+      dryHopDays: 5,
+      coldCrashDays: 1,
+      gardeDays: 30,
+    });
+  });
+});
+
 describe("PATCH /api/batches/:id/milestones/:kind — ajustement", () => {
   const patch = (kind: string, payload: unknown) =>
     inject(app, "PATCH", `/api/batches/batch_1/milestones/${kind}`, {
@@ -714,6 +820,7 @@ describe("RBAC des routes de cycle (deny-by-default, ADR-10)", () => {
   const routes = [
     { method: "GET" as const, url: "/api/batches/batch_1/milestones", write: false },
     { method: "GET" as const, url: "/api/batches/batch_1/volumes", write: false },
+    { method: "GET" as const, url: "/api/batches/batch_1/cycle-defaults", write: false },
     {
       method: "POST" as const,
       url: "/api/batches/batch_1/milestones",
