@@ -12,8 +12,23 @@ reset`, rejoue le seed de base) puis amorce les données de parcours
   origine) sur des **ports dédiés E2E** (API `3100`, web `4173`) puis pilote un
   navigateur chromium en cible tablette.
 - `helpers/auth.ts` → `loginAs(page, role)` (admin / brasseur / caisse).
-- `tests/brassage.spec.ts` → parcours **brassage complet** (recette → batch →
-  Jour J).
+- `tests/brassage.spec.ts` → parcours **boucle brassin complète** (M9-14) :
+  recette publiée → batch → Jour J intégral (filtration, assainissement du
+  circuit, whirlpool, refroidissement) → durées prévisionnelles et jalons datés
+  → vue Brassins → conditionnement → stock de produits finis affichable au bar.
+
+### Budget de temps
+
+Le parcours brassin dure **~1 min 05**, dont **60 s d'attente réelle** sur le
+palier d'assainissement du circuit. Ce n'est pas une temporisation : le test
+attend que le bouton « Valider l'étape » s'active.
+
+Cette minute est un **plancher**. La durée d'ébullition (`timeMin`) et le délai
+d'assainissement (`Settings.coolingCircuitSanitizeLeadMin`) sont des **entiers
+de minutes** ; le palier le plus court qu'on puisse produire dure donc une
+minute. La recette de parcours est déjà calée dessus (cf. `BOIL_TIME_MIN` dans
+`fixtures/seed-e2e.ts`) — inutile de chercher à la raccourcir sans changer ces
+types.
 
 ## Lancer en local (Windows / PowerShell)
 
