@@ -86,6 +86,16 @@ function dayView(opts: {
   };
 }
 
+/** Défauts de cycle (M9-16) — la recette de test ne porte pas de dry hop. */
+const CYCLE_DEFAULTS = {
+  timezone: "Europe/Paris",
+  fermentationDays: 14,
+  dryHopDays: 3,
+  coldCrashDays: 2,
+  gardeDays: 21,
+  hasDryHop: false,
+};
+
 interface Scenario {
   day: ReturnType<typeof dayView>;
   onEvent: (body: { type?: string }) => Response;
@@ -116,6 +126,15 @@ function installFetch() {
     }
     if (path.endsWith("/api/batches/b1/day") && method === "GET") {
       return Promise.resolve(json(200, { day: scenario.day }));
+    }
+    // Saisie du cycle en fin d'ensemencement (M9-12) : défauts + création de la
+    // séquence. Couverts en propre par `day-cycle-plan.test.tsx` ; ici, ils
+    // n'ont qu'à répondre pour que la dernière étape reste franchissable.
+    if (path.endsWith("/cycle-defaults") && method === "GET") {
+      return Promise.resolve(json(200, { defaults: CYCLE_DEFAULTS }));
+    }
+    if (path.endsWith("/milestones") && method === "POST") {
+      return Promise.resolve(json(201, { milestones: [], created: true }));
     }
     if (/\/api\/batches\/[^/]+$/.exec(path) && method === "GET") {
       return Promise.resolve(json(200, { batch: BATCH }));
@@ -205,10 +224,12 @@ describe("dérouleur d'étapes Jour J (M4-09)", () => {
   });
 
   it("un rejet (409) est affiché en toast sans avancer l'étape", async () => {
-    // Étape d'ensemencement (sans mesure requise) : « Valider » est proposé, mais le
-    // serveur refuse — on vérifie le toast et l'absence d'avancée.
+    // Étape d'initialisation (sans mesure requise) : « Valider » est proposé, mais
+    // le serveur refuse — on vérifie le toast et l'absence d'avancée. Volontairement
+    // **pas** l'ensemencement : depuis M9-12, sa validation ouvre d'abord la saisie
+    // des durées du cycle, ce qui n'a rien à voir avec le refus testé ici.
     scenario = {
-      day: dayView({ phase: "ENSEMENCEMENT", cursor: 2, status: "AWAITING_VALIDATION" }),
+      day: dayView({ phase: "INITIALISATION", cursor: 0, status: "AWAITING_VALIDATION" }),
       onEvent: () =>
         json(409, {
           error: {
@@ -224,11 +245,13 @@ describe("dérouleur d'étapes Jour J (M4-09)", () => {
     await user.click(await screen.findByRole("button", { name: /valider l'étape/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Étape pas prête à valider.");
-    // État inchangé : toujours sur l'étape 3/3.
-    expect(screen.getByText("Étape 3 / 3")).toBeInTheDocument();
+    // État inchangé : toujours sur l'étape 1/3.
+    expect(screen.getByText("Étape 1 / 3")).toBeInTheDocument();
   });
 
-  it("valide la dernière étape → écran de fin vers la fiche batch", async () => {
+  // La dernière étape du plan est l'ensemencement : depuis M9-12, sa validation
+  // passe par la saisie des durées du cycle avant de clore le Jour J.
+  it("valide la dernière étape (via la saisie du cycle) → écran de fin vers la fiche batch", async () => {
     scenario = {
       day: dayView({ phase: "ENSEMENCEMENT", cursor: 2, status: "AWAITING_VALIDATION" }),
       onEvent: () => {
@@ -248,6 +271,7 @@ describe("dérouleur d'étapes Jour J (M4-09)", () => {
     renderApp();
 
     await user.click(await screen.findByRole("button", { name: /valider l'étape/i }));
+    await user.click(await screen.findByRole("button", { name: /valider et planifier/i }));
 
     expect(await screen.findByRole("heading", { name: "Brassin terminé" })).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /voir le détail du batch/i });

@@ -12,9 +12,15 @@ import { useEffect } from "react";
 import { batchKeys } from "@/features/batches/hooks";
 import { dayKeys } from "@/features/day/hooks";
 import { dayQueueKeys } from "@/features/day/offline/optimistic";
-import { countPending, pendingEvents, removeEvents } from "@/features/day/offline/queue";
+import {
+  countPending,
+  pendingCyclePlan,
+  pendingEvents,
+  removeCyclePlan,
+  removeEvents,
+} from "@/features/day/offline/queue";
 import { useDayToasts } from "@/features/day/toast";
-import { dayApi } from "@/lib/api";
+import { ApiError, batchesApi, type CyclePlanInput, dayApi } from "@/lib/api";
 
 /**
  * Rejoue la file d'un brassin via `:sync`. Idempotent et sûr à appeler en
@@ -60,6 +66,56 @@ export async function flushQueue(
 }
 
 /**
+ * Rejoue la **planification de cycle** mise en attente en fin d'ensemencement
+ * (M9-12). `POST /batches/:id/milestones` est idempotent (M9-07) : un rejeu sur
+ * une séquence déjà créée renvoie `created: false` sans rien dupliquer.
+ *
+ * Le `pitchedAt` figé à la saisie part avec le corps : c'est lui qui date le
+ * cycle, pas l'instant de la reconnexion.
+ */
+export async function flushCyclePlan(
+  batchId: string,
+  qc: QueryClient,
+  pushToast: (message: string) => void,
+): Promise<void> {
+  const queued = await pendingCyclePlan(batchId);
+  if (!queued) return;
+
+  try {
+    await batchesApi.planCycle(batchId, queued.payload as CyclePlanInput);
+  } catch (error) {
+    if (!isDefinitiveRefusal(error)) return;
+    // Refus définitif : la garder ferait boucler la resynchro à chaque
+    // reconnexion. On la retire, mais on le **dit** — une planification perdue
+    // en silence laisserait un brassin sans dates que personne ne viendrait
+    // chercher.
+    await removeCyclePlan(batchId);
+    void qc.invalidateQueries({ queryKey: dayQueueKeys.count(batchId) });
+    pushToast("Planification du cycle refusée à la synchronisation.");
+    return;
+  }
+
+  await removeCyclePlan(batchId);
+  void qc.invalidateQueries({ queryKey: batchKeys.milestones(batchId) });
+  void qc.invalidateQueries({ queryKey: dayQueueKeys.count(batchId) });
+}
+
+/**
+ * L'échec est-il **définitif** (inutile de retenter) ?
+ *
+ * Seuls le sont les refus que le serveur opposera à l'identique : payload
+ * invalide (400/422), brassin disparu (404), conflit (409). Restent en file :
+ * la panne réseau (`status: 0`), les 5xx, et **401/403** — une session expirée
+ * pendant une nuit hors ligne se résout à la reconnexion de l'opérateur, et
+ * jeter sa saisie pour cette raison serait la perdre au pire moment.
+ */
+function isDefinitiveRefusal(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 401 || error.status === 403) return false;
+  return error.status >= 400 && error.status < 500;
+}
+
+/**
  * Arme la resynchro d'un brassin : rejoue la file à la reconnexion (`online`) et
  * une fois au montage (au cas où l'appli s'ouvre en ligne avec une file laissée
  * par une session précédente). À monter une fois sur l'écran Jour J.
@@ -70,7 +126,11 @@ export function useDaySync(batchId: string): void {
   useEffect(() => {
     if (!batchId) return;
     const flush = (): void => {
-      void flushQueue(batchId, qc, pushToast);
+      // Les événements d'abord : la planification de cycle suit l'ensemencement,
+      // et la rejouer avant lui daterait le cycle sur une étape pas encore
+      // remontée. Les deux sont indépendants côté serveur, l'ordre reste le
+      // bon récit pour l'opérateur qui regarde la bannière se vider.
+      void flushQueue(batchId, qc, pushToast).then(() => flushCyclePlan(batchId, qc, pushToast));
     };
     window.addEventListener("online", flush);
     if (navigator.onLine) flush();

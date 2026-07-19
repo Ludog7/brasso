@@ -757,6 +757,26 @@ export interface BatchMilestone {
 }
 
 /**
+ * Durées prévisionnelles saisies à la validation de l'ensemencement (M9-12).
+ * Toutes optionnelles : à défaut, les `Settings` de l'instance s'appliquent —
+ * le front ne porte **aucune** valeur par défaut (ADR-01).
+ */
+export interface CyclePlanInput {
+  /** Instant d'ensemencement (ISO), capté à l'action pour survivre à un rejeu offline. */
+  pitchedAt?: string;
+  fermentationDays?: number;
+  dryHopDays?: number;
+  coldCrashDays?: number;
+  gardeDays?: number;
+}
+
+/** Séquence créée. `created: false` = elle préexistait (rejeu offline idempotent). */
+export interface CyclePlanResult {
+  milestones: BatchMilestone[];
+  created: boolean;
+}
+
+/**
  * Défauts de cycle applicables à un brassin (miroir de `CycleDefaultsView`,
  * M9-16) : de quoi pré-remplir la saisie de fin d'ensemencement **et** en
  * calculer l'aperçu daté avec `buildBatchMilestones` de `@brasso/core`.
@@ -815,6 +835,28 @@ export const batchesApi = {
     request<{ milestones: BatchMilestone[] }>(`/api/batches/${id}/milestones`).then(
       (r) => r.milestones,
     ),
+
+  /**
+   * Crée la séquence de jalons à la validation de l'ensemencement (M9-07).
+   * **Idempotent** : rejouer la même planification renvoie la séquence existante
+   * avec `created: false` — c'est ce qui rend le rejeu offline sûr.
+   */
+  planCycle: (id: string, input: CyclePlanInput): Promise<CyclePlanResult> =>
+    request<CyclePlanResult>(`/api/batches/${id}/milestones`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  /** Ajuste la durée prévue d'un jalon → séquence recalculée en cascade (M9-07). */
+  adjustMilestone: (
+    id: string,
+    kind: BatchMilestoneKind,
+    plannedDurationDays: number,
+  ): Promise<BatchMilestone[]> =>
+    request<{ milestones: BatchMilestone[] }>(`/api/batches/${id}/milestones/${kind}`, {
+      method: "PATCH",
+      body: JSON.stringify({ plannedDurationDays }),
+    }).then((r) => r.milestones),
 
   /** Défauts de cycle du brassin : durées, fuseau de l'instance, dry hop (M9-16). */
   cycleDefaults: (id: string): Promise<BatchCycleDefaults> =>
