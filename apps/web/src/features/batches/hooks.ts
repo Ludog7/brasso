@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type BatchCreateInput,
   batchesApi,
+  type BatchMilestoneKind,
   type BatchOverviewFilters,
   type BatchStatus,
   type MeasureCreateInput,
@@ -67,6 +68,27 @@ export function useBatchVolumes(id: string | undefined) {
     queryKey: batchKeys.volumes(id ?? ""),
     queryFn: () => batchesApi.volumes(id as string),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Ajuste la durée prévue d'un jalon (M9-12 §E) → le serveur recalcule la
+ * séquence en cascade et renvoie la liste complète (M9-07).
+ *
+ * Aucun optimisme ici : la cascade est une règle serveur (elle reprend à la fin
+ * **constatée** du dernier jalon achevé). La rejouer côté client produirait un
+ * affichage plausible mais faux le temps de l'aller-retour.
+ */
+export function useAdjustMilestone(batchId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, days }: { kind: BatchMilestoneKind; days: number }) =>
+      batchesApi.adjustMilestone(batchId, kind, days),
+    onSuccess: (milestones) => {
+      qc.setQueryData(batchKeys.milestones(batchId), milestones);
+      // Les échéances de la liste « Brassins » découlent des jalons (M9-09).
+      void qc.invalidateQueries({ queryKey: batchKeys.all });
+    },
   });
 }
 

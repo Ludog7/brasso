@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -44,9 +45,20 @@ const VOLUMES: BatchVolumes = {
   warnings: [],
 };
 
+/** Défauts de cycle (M9-16), lus par la frise pour le rattrapage de planification. */
+const CYCLE_DEFAULTS = {
+  timezone: "Europe/Paris",
+  fermentationDays: 14,
+  dryHopDays: 3,
+  coldCrashDays: 2,
+  gardeDays: 21,
+  hasDryHop: false,
+};
+
 let milestones: BatchMilestone[];
 let volumes: BatchVolumes;
 let failVolumes = false;
+let calls: { method: string; url: string; body?: Record<string, unknown> }[] = [];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -56,11 +68,25 @@ function json(status: number, body: unknown): Response {
 }
 
 function installFetch() {
-  const impl = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+  const impl = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input.toString();
+    const method = init?.method ?? "GET";
     const path = url.split("?")[0] ?? url;
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : undefined;
+    calls.push({ method, url, body });
 
     if (path.endsWith("/auth/me")) return Promise.resolve(json(200, { user: USER }));
+    if (path.endsWith("/cycle-defaults")) {
+      return Promise.resolve(json(200, { defaults: CYCLE_DEFAULTS }));
+    }
+    // Ajustement d'un jalon (M9-12 §E) : le serveur renvoie la séquence
+    // recalculée en cascade — ici, inchangée, le test portant sur la requête.
+    if (/\/milestones\/[A-Z_]+$/.exec(path) && method === "PATCH") {
+      return Promise.resolve(json(200, { milestones }));
+    }
     if (path.endsWith("/milestones")) return Promise.resolve(json(200, { milestones }));
     if (path.endsWith("/volumes")) {
       if (failVolumes)
@@ -105,6 +131,7 @@ beforeEach(() => {
   ];
   volumes = { ...VOLUMES };
   failVolumes = false;
+  calls = [];
   useSession.setState({ user: USER });
   installFetch();
 });
@@ -153,6 +180,78 @@ describe("frise des jalons du cycle (M9-10 §B)", () => {
     milestones = [];
     renderPanel();
     expect(await screen.findByText(/le cycle démarre à la validation/i)).toBeInTheDocument();
+  });
+
+  it("sans jalon, offre le rattrapage : un Jour J forcé ne doit pas laisser un cul-de-sac", async () => {
+    milestones = [];
+    renderPanel();
+    expect(await screen.findByRole("button", { name: /planifier le cycle/i })).toBeInTheDocument();
+  });
+});
+
+describe("ajustement des durées prévues depuis la fiche (M9-12 §E)", () => {
+  it("un jalon achevé est présenté comme figé, sans action qui échouerait", async () => {
+    renderPanel();
+    const fermentation = (await screen.findByText("Fermentation")).closest("li") as HTMLElement;
+
+    // Le serveur refuse (409) l'ajustement d'un jalon achevé : ne rien proposer
+    // vaut mieux qu'un bouton qui mène à une erreur.
+    expect(within(fermentation).getByText(/figé/i)).toBeInTheDocument();
+    expect(
+      within(fermentation).queryByRole("button", { name: /ajuster la durée/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("un jalon à venir reste ajustable", async () => {
+    renderPanel();
+    const garde = (await screen.findByText("Garde")).closest("li") as HTMLElement;
+    expect(within(garde).getByRole("button", { name: /ajuster la durée/i })).toBeInTheDocument();
+  });
+
+  it("enregistrer une nouvelle durée envoie le PATCH du jalon", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const garde = (await screen.findByText("Garde")).closest("li") as HTMLElement;
+
+    await user.click(within(garde).getByRole("button", { name: /ajuster la durée/i }));
+    const input = within(garde).getByLabelText(/durée prévue/i);
+    await user.clear(input);
+    await user.type(input, "30");
+    await user.click(within(garde).getByRole("button", { name: /enregistrer/i }));
+
+    await waitFor(() => {
+      const patched = calls.find((c) => c.method === "PATCH");
+      expect(patched?.url).toContain("/milestones/GARDE");
+      expect(patched?.body).toEqual({ plannedDurationDays: 30 });
+    });
+  });
+
+  it("une durée hors bornes est refusée avec un message, sans requête", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const garde = (await screen.findByText("Garde")).closest("li") as HTMLElement;
+
+    await user.click(within(garde).getByRole("button", { name: /ajuster la durée/i }));
+    const input = within(garde).getByLabelText(/durée prévue/i);
+    await user.clear(input);
+    await user.type(input, "400");
+
+    expect(within(garde).getByRole("button", { name: /enregistrer/i })).toBeDisabled();
+    expect(within(garde).getByRole("alert")).toHaveTextContent(/entre 0 et 365/);
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("annonce qu'une durée à 0 supprime le jalon", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const garde = (await screen.findByText("Garde")).closest("li") as HTMLElement;
+
+    await user.click(within(garde).getByRole("button", { name: /ajuster la durée/i }));
+    const input = within(garde).getByLabelText(/durée prévue/i);
+    await user.clear(input);
+    await user.type(input, "0");
+
+    expect(within(garde).getByText(/ce jalon sera supprimé/i)).toBeInTheDocument();
   });
 });
 

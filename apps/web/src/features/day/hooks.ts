@@ -10,12 +10,15 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { batchKeys } from "@/features/batches/hooks";
 import { applyOptimistic, dayQueueKeys, toWireEvent } from "@/features/day/offline/optimistic";
-import { enqueueEvent } from "@/features/day/offline/queue";
+import { enqueueCyclePlan, enqueueEvent } from "@/features/day/offline/queue";
 import { useDayToasts } from "@/features/day/toast";
 import {
   ApiError,
+  batchesApi,
   type CorrectionDecisionInput,
   type CorrectionEntry,
+  type CyclePlanInput,
+  type CyclePlanResult,
   dayApi,
   type DayEventRequest,
   type DaySession,
@@ -114,6 +117,42 @@ export function useStartDay(batchId: string) {
     },
   });
 }
+
+/**
+ * Planifie le cycle post-ensemencement (M9-12) : `POST /batches/:id/milestones`.
+ *
+ * **En ligne** : la séquence renvoyée amorce le cache des jalons. **Hors ligne**
+ * (ADR-08) : le corps — `pitchedAt` compris, figé à la saisie — est mis dans la
+ * file IndexedDB et rejoué à la reconnexion par `flushCyclePlan`. La saisie
+ * intervenant en toute fin de Jour J, souvent dans un local sans réseau, elle ne
+ * doit en aucun cas être perdue parce que l'atelier était hors couverture.
+ */
+export function usePlanCycle(batchId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    // `always` : doit s'exécuter hors-ligne pour capter la saisie dans la file.
+    networkMode: "always",
+    mutationFn: async (input: CyclePlanInput): Promise<CyclePlanOutcome> => {
+      if (navigator.onLine) {
+        return { mode: "online", result: await batchesApi.planCycle(batchId, input) };
+      }
+      await enqueueCyclePlan({ batchId, payload: { ...input } });
+      return { mode: "offline", result: null };
+    },
+    onSuccess: ({ mode, result }) => {
+      if (mode === "offline") {
+        void qc.invalidateQueries({ queryKey: dayQueueKeys.count(batchId) });
+        return;
+      }
+      qc.setQueryData(batchKeys.milestones(batchId), result.milestones);
+      void qc.invalidateQueries({ queryKey: batchKeys.all });
+    },
+  });
+}
+
+/** Issue d'une planification : appliquée en ligne, ou mise en file hors-ligne. */
+type CyclePlanOutcome =
+  { mode: "online"; result: CyclePlanResult } | { mode: "offline"; result: null };
 
 /** Issue d'un événement : appliqué en ligne (serveur) ou mis en file hors-ligne (optimiste). */
 interface DayEventOutcome {

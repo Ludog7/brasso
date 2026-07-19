@@ -21,6 +21,11 @@
  * écarts tracés. À la filtration (`LAUTER`), `PreBoilCorrections` (M4-13) propose
  * des corrections densité chiffrées. En fin de plan, écran de clôture (batch
  * `EN_FERMENTATION`) avec lien vers la fiche.
+ *
+ * **Ensemencement** (M9-12) : sa validation n'est pas immédiate — elle ouvre
+ * d'abord `CyclePlanDialog` (durées prévisionnelles, jalons datés), puis émet
+ * `VALIDATE_STEP`. C'est la charnière entre le Jour J et un cycle qui se compte
+ * en semaines : sans cette saisie, la suite du brassin ne serait pas datée.
  */
 
 import { type StepValidationCheck, stepValidationCheck } from "@brasso/core";
@@ -28,6 +33,8 @@ import { AlertTriangle, CheckCircle2, Loader2, Play } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { useBatchCycleDefaults } from "@/features/batches/hooks";
+import { CyclePlanDialog } from "@/features/day/CyclePlanDialog";
 import { DeviationJournal } from "@/features/day/DeviationJournal";
 import { ForceStepDialog } from "@/features/day/ForceStepDialog";
 import { HoldTimer } from "@/features/day/HoldTimer";
@@ -104,6 +111,11 @@ export function StepRunner({
 }) {
   const event = useDayEvent(batchId);
   const [forcing, setForcing] = useState(false);
+  const [planningCycle, setPlanningCycle] = useState(false);
+  // Chargés dès l'ouverture de l'écran, pas à l'ouverture du dialogue : la fin
+  // du Jour J peut se dérouler hors couverture réseau, et une saisie
+  // pré-remplie suppose que les défauts soient déjà en cache (M9-16).
+  const cycleDefaults = useBatchCycleDefaults(batchId);
   const { plan, cursor, status } = day.state;
 
   if (cursor >= plan.length) {
@@ -111,6 +123,20 @@ export function StepRunner({
   }
 
   const step = plan[cursor];
+  /**
+   * L'ensemencement ne se valide pas comme une étape ordinaire (M9-12 §A) : sa
+   * validation ouvre d'abord la saisie des durées du cycle, **avant** de clore
+   * le Jour J. C'est le seul moment où le brassin bascule d'un déroulé à la
+   * minute vers des phases qui se comptent en semaines.
+   */
+  const isPitching = step?.phase === "PITCHING";
+  const validateStep = (): void => {
+    if (isPitching) {
+      setPlanningCycle(true);
+      return;
+    }
+    event.mutate({ type: "VALIDATE_STEP" });
+  };
   const hasMeasurements = (step?.requiredMeasurements?.length ?? 0) > 0;
   const showMeasures =
     step && hasMeasurements && (status === "TIMER_RUNNING" || status === "AWAITING_VALIDATION");
@@ -166,19 +192,11 @@ export function StepRunner({
         ) : null}
 
         {status === "TIMER_RUNNING" ? (
-          <HoldTimer
-            state={day.state}
-            pending={event.isPending}
-            onValidate={() => event.mutate({ type: "VALIDATE_STEP" })}
-          />
+          <HoldTimer state={day.state} pending={event.isPending} onValidate={validateStep} />
         ) : null}
 
         {status === "AWAITING_VALIDATION" ? (
-          <ValidateStep
-            check={check}
-            pending={event.isPending}
-            onValidate={() => event.mutate({ type: "VALIDATE_STEP" })}
-          />
+          <ValidateStep check={check} pending={event.isPending} onValidate={validateStep} />
         ) : null}
       </div>
 
@@ -215,6 +233,22 @@ export function StepRunner({
 
       {forcing && step ? (
         <ForceStepDialog step={step} batchId={batchId} onClose={() => setForcing(false)} />
+      ) : null}
+
+      {planningCycle ? (
+        <CyclePlanDialog
+          batchId={batchId}
+          defaults={cycleDefaults.data ?? null}
+          onPlanned={() => {
+            setPlanningCycle(false);
+            event.mutate({ type: "VALIDATE_STEP" });
+          }}
+          onSkip={() => {
+            setPlanningCycle(false);
+            event.mutate({ type: "VALIDATE_STEP" });
+          }}
+          onClose={() => setPlanningCycle(false)}
+        />
       ) : null}
     </div>
   );
