@@ -33,11 +33,31 @@ export function useScreens(surfaceId: string, enabled = true) {
   });
 }
 
-/** Articles conditionnés du catalogue (produits affichables sur un écran). */
+/**
+ * Articles **affichables au bar** : conditionnements **et produits finis** (#274).
+ *
+ * `PRODUIT_FINI` a été ajouté ici — le filtre d'origine (M7-12) ne retenait que
+ * `CONDITIONNEMENT`, ce qui était juste à l'époque : rien ne produisait encore
+ * de produit fini. Depuis M9-08, le conditionnement d'un brassin en crée un, et
+ * c'est **la bière qu'on vient de brasser** qui manquait au sélecteur.
+ *
+ * Deux requêtes fusionnées plutôt qu'une : `GET /api/catalog-items` ne prend
+ * qu'un `kind` à la fois. Élargir le contrat de la route aurait touché un module
+ * partagé (référentiels, éditeurs de recettes) pour le seul besoin de ce picker.
+ *
+ * Les produits finis viennent en tête : ce sont les articles qu'on cherche à
+ * afficher après un brassin, et ce sont les plus récents.
+ */
 export function useCatalogItems(enabled = true) {
   return useQuery({
     queryKey: ["catalog-items", "display-picker"] as const,
-    queryFn: () => referentialsApi.catalogItems({ kind: "CONDITIONNEMENT" }),
+    queryFn: async () => {
+      const [finished, packaged] = await Promise.all([
+        referentialsApi.catalogItems({ kind: "PRODUIT_FINI" }),
+        referentialsApi.catalogItems({ kind: "CONDITIONNEMENT" }),
+      ]);
+      return [...finished, ...packaged];
+    },
     enabled,
   });
 }

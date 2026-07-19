@@ -58,14 +58,18 @@ function installFetch() {
 
     if (path.endsWith("/auth/me")) return Promise.resolve(json(200, { user: USER() }));
 
+    // Catalogue filtré par `kind` — comme l'API. Le picker interroge les deux
+    // familles affichables (#274) : un stub qui ignorerait le filtre renverrait
+    // deux fois les mêmes articles et masquerait la fusion.
     if (path.endsWith("/api/catalog-items") && method === "GET") {
+      const kind = new URL(url, "http://localhost").searchParams.get("kind");
+      const catalog = [
+        { id: "cat-blonde", name: "Blonde 33cl", kind: "CONDITIONNEMENT" },
+        { id: "cat-ipa", name: "IPA 33cl", kind: "CONDITIONNEMENT" },
+        { id: "cat-brassin-7", name: "Brassin n°7", kind: "PRODUIT_FINI" },
+      ];
       return Promise.resolve(
-        json(200, {
-          items: [
-            { id: "cat-blonde", name: "Blonde 33cl", kind: "CONDITIONNEMENT" },
-            { id: "cat-ipa", name: "IPA 33cl", kind: "CONDITIONNEMENT" },
-          ],
-        }),
+        json(200, { items: kind === null ? catalog : catalog.filter((i) => i.kind === kind) }),
       );
     }
 
@@ -240,6 +244,63 @@ describe("config affichage — surfaces & écrans (M7-12)", () => {
 });
 
 describe("config affichage — sélection de produits (M7-12)", () => {
+  /**
+   * #274 : le picker ne retenait que `CONDITIONNEMENT`, si bien que la bière
+   * qu'on venait de conditionner (`PRODUIT_FINI`, M9-08) était absente de la
+   * liste — le dernier maillon de la boucle M9, et la preuve de l'arbitrage Q10.
+   */
+  it("offre les produits finis d'un brassin, pas seulement les conditionnements", async () => {
+    installFetch();
+    const user = userEvent.setup();
+    renderApp();
+
+    const row = (await screen.findByText("Écran principal")).closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /produits/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    const addSelect = within(dialog).getByLabelText("Ajouter un produit");
+    await waitFor(() =>
+      expect(within(addSelect).getByRole("option", { name: "Brassin n°7" })).toBeInTheDocument(),
+    );
+    // Les conditionnements restent offerts : élargir n'est pas remplacer.
+    expect(within(addSelect).getByRole("option", { name: "Blonde 33cl" })).toBeInTheDocument();
+    // Aucun doublon : les deux familles sont fusionnées, pas empilées.
+    expect(within(addSelect).getAllByRole("option", { name: "Blonde 33cl" })).toHaveLength(1);
+  });
+
+  it("un produit fini ajouté part bien dans la sélection enregistrée", async () => {
+    installFetch();
+    const user = userEvent.setup();
+    renderApp();
+
+    const row = (await screen.findByText("Écran principal")).closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /produits/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    const addSelect = within(dialog).getByLabelText("Ajouter un produit");
+    await waitFor(() =>
+      expect(within(addSelect).getByRole("option", { name: "Brassin n°7" })).toBeInTheDocument(),
+    );
+    await user.selectOptions(addSelect, "cat-brassin-7");
+    await user.click(within(dialog).getByRole("button", { name: /^ajouter$/i }));
+    await user.click(within(dialog).getByRole("button", { name: /enregistrer la sélection/i }));
+
+    await waitFor(() => {
+      expect(putItemsCall()?.body).toEqual({
+        items: [
+          {
+            catalogItemId: "cat-brassin-7",
+            isNew: false,
+            isFavorite: false,
+            isSpecial: false,
+            priceCents: null,
+            sortOrder: 0,
+          },
+        ],
+      });
+    });
+  });
+
   it("compose une sélection avec flag + tri par boutons, puis PUT items", async () => {
     installFetch();
     const user = userEvent.setup();
