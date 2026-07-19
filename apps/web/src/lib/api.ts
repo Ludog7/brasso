@@ -812,6 +812,73 @@ export interface BatchVolumes {
   warnings: string[];
 }
 
+/** Mise en condition d'une ligne avant vente (miroir de `ConditioningMethod`, M9-15). */
+export type ConditioningMethod = "NONE" | "REFERMENTATION" | "FORCED_CARBONATION";
+
+/**
+ * Ligne de conditionnement envoyée (M9-08). `containerVolumeL` est le volume
+ * **réellement rempli**, pas la contenance nominale du catalogue : un fût de
+ * 20 L peut n'en recevoir que 18. `containerItemId` absent = contenant non suivi
+ * en stock, aucune sortie ne sera écrite pour lui.
+ */
+export interface PackagingLineInput {
+  containerItemId?: string;
+  containerVolumeL: number;
+  quantity: number;
+  conditioningMethod?: ConditioningMethod;
+  co2TargetVolumes?: number;
+}
+
+/**
+ * Corps d'un conditionnement. **Aucun volume global** : le serveur le déduit des
+ * contenants saisis (M9-06) — un volume relevé en vrac divergerait de la somme
+ * des lignes, et il faudrait alors arbitrer entre deux chiffres également
+ * « constatés ».
+ */
+export interface PackagingRecordInput {
+  lines: PackagingLineInput[];
+  productName?: string;
+  note?: string;
+}
+
+/** Ligne de conditionnement persistée (miroir de `PackagingLineApiView`). */
+export interface PackagingLine {
+  id: string;
+  catalogItemId: string;
+  containerItemId: string | null;
+  containerVolumeL: number;
+  quantity: number;
+  conditioningMethod: ConditioningMethod;
+  co2TargetVolumes: number | null;
+  measuredPressureBar: number | null;
+  measuredTempC: number | null;
+  carbonationValidatedAt: string | null;
+  availableForSaleAt: string | null;
+  availableForSaleDate: string | null;
+  packagedAt: string;
+  note: string | null;
+}
+
+/** Mouvement de stock généré par un conditionnement. */
+export interface PackagingMovement {
+  id: string;
+  catalogItemId: string;
+  delta: number;
+  reason: string;
+}
+
+/** Résultat d'un conditionnement enregistré (miroir de `PackagingRecordResult`). */
+export interface PackagingRecordResult {
+  /** Article `PRODUIT_FINI` du brassin, créé au premier conditionnement. */
+  productItemId: string;
+  lines: PackagingLine[];
+  movements: PackagingMovement[];
+  /** Volume conditionné (L) **déduit** des contenants par le serveur. */
+  packagedVolumeL: number;
+  /** Statut du brassin après enregistrement (`TERMINE`). */
+  batchStatus: BatchStatus;
+}
+
 export const batchesApi = {
   /**
    * Vue « Brassins » enrichie (M9-09) : étape courante et prochaine échéance en
@@ -857,6 +924,23 @@ export const batchesApi = {
       method: "PATCH",
       body: JSON.stringify({ plannedDurationDays }),
     }).then((r) => r.milestones),
+
+  /** Conditionnements déjà enregistrés sur le brassin (M9-08). */
+  packaging: (id: string): Promise<PackagingLine[]> =>
+    request<{ packaging: PackagingLine[] }>(`/api/batches/${id}/packaging`).then(
+      (r) => r.packaging,
+    ),
+
+  /**
+   * Enregistre un conditionnement : lignes, article produit fini, mouvements de
+   * stock, puis passage du brassin en `TERMINE`. **Irréversible** au sens du
+   * registre append-only : une erreur se corrige par un mouvement inverse.
+   */
+  recordPackaging: (id: string, input: PackagingRecordInput): Promise<PackagingRecordResult> =>
+    request<PackagingRecordResult>(`/api/batches/${id}/packaging`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   /** Défauts de cycle du brassin : durées, fuseau de l'instance, dry hop (M9-16). */
   cycleDefaults: (id: string): Promise<BatchCycleDefaults> =>

@@ -27,7 +27,12 @@ import { Label } from "@/ui/label";
 import { Select } from "@/ui/select";
 
 type KindFilter = CatalogKind | "ALL";
-const KIND_FILTERS: KindFilter[] = ["ALL", "RECETTE", "BULK", "CONDITIONNEMENT"];
+/**
+ * `PRODUIT_FINI` figure dans les filtres depuis M9-13 : le conditionnement d'un
+ * brassin crée un article de cette famille, et c'est là qu'on vient constater
+ * qu'une bière est bien entrée en stock, prête à être vendue.
+ */
+const KIND_FILTERS: KindFilter[] = ["ALL", "RECETTE", "BULK", "CONDITIONNEMENT", "PRODUIT_FINI"];
 
 type Dialog = { mode: "create" } | { mode: "edit"; item: StockItem } | { mode: "movement" } | null;
 

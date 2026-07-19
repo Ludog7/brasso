@@ -78,6 +78,9 @@ const PlanBatchPage = lazy(() =>
 const BatchDetailPage = lazy(() =>
   import("@/routes/batches/BatchDetailPage").then((m) => ({ default: m.BatchDetailPage })),
 );
+const PackagingPage = lazy(() =>
+  import("@/routes/batches/PackagingPage").then((m) => ({ default: m.PackagingPage })),
+);
 const DayScreen = lazy(() =>
   import("@/features/day/DayScreen").then((m) => ({ default: m.DayScreen })),
 );
@@ -149,6 +152,7 @@ export function App() {
           <Route path="/batches" element={<BatchesListPage />} />
           <Route path="/batches/new/:recipeId" element={<PlanBatchPage />} />
           <Route path="/batches/:id" element={<BatchDetailPage />} />
+          <Route path="/batches/:id/packaging" element={<PackagingPage />} />
           <Route path="/batches/:id/day" element={<DayScreen />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
