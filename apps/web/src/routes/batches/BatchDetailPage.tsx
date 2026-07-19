@@ -113,6 +113,13 @@ export function BatchDetailPage() {
             <Link to={`/batches/${data.id}/day`}>Piloter le Jour J</Link>
           </Button>
         ) : null}
+        {/* Conditionnement (M9-13) : proposé aux mêmes statuts que le serveur
+            accepte (M9-08), pour ne pas ouvrir un écran qui refusera la saisie. */}
+        {data.status === "EN_FERMENTATION" || data.status === "EN_CONDITIONNEMENT" ? (
+          <Button asChild className="ml-auto">
+            <Link to={`/batches/${data.id}/packaging`}>Conditionner</Link>
+          </Button>
+        ) : null}
       </header>
 
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">

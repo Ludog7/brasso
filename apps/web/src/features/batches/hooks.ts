@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { stockKeys } from "@/features/stock/hooks";
 import {
   type BatchCreateInput,
   batchesApi,
@@ -7,6 +8,7 @@ import {
   type BatchOverviewFilters,
   type BatchStatus,
   type MeasureCreateInput,
+  type PackagingRecordInput,
 } from "@/lib/api";
 
 /** Fabrique de clés de cache : une racine `batches` pour invalider large. */
@@ -19,6 +21,7 @@ export const batchKeys = {
   milestones: (id: string) => ["batches", "milestones", id] as const,
   volumes: (id: string) => ["batches", "volumes", id] as const,
   cycleDefaults: (id: string) => ["batches", "cycle-defaults", id] as const,
+  packaging: (id: string) => ["batches", "packaging", id] as const,
 };
 
 /**
@@ -88,6 +91,35 @@ export function useAdjustMilestone(batchId: string) {
       qc.setQueryData(batchKeys.milestones(batchId), milestones);
       // Les échéances de la liste « Brassins » découlent des jalons (M9-09).
       void qc.invalidateQueries({ queryKey: batchKeys.all });
+    },
+  });
+}
+
+/** Conditionnements déjà enregistrés sur le brassin (M9-08). */
+export function useBatchPackaging(id: string | undefined) {
+  return useQuery({
+    queryKey: batchKeys.packaging(id ?? ""),
+    queryFn: () => batchesApi.packaging(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+/**
+ * Enregistre un conditionnement (M9-13) : lignes, produit fini, mouvements de
+ * stock, passage du brassin en `TERMINE`.
+ *
+ * Invalide **large** en succès : l'opération touche le brassin (statut, volumes,
+ * coût à l'unité) *et* le stock (produit fini créé, contenants consommés).
+ * Rafraîchir la seule vue courante laisserait l'écran Stock afficher un
+ * catalogue d'avant le conditionnement.
+ */
+export function useRecordPackaging(batchId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PackagingRecordInput) => batchesApi.recordPackaging(batchId, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: batchKeys.all });
+      void qc.invalidateQueries({ queryKey: stockKeys.all });
     },
   });
 }
