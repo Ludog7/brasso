@@ -48,6 +48,21 @@ export const batchCycleRoutes: FastifyPluginAsync<BatchCycleRoutesOptions> = asy
     },
   );
 
+  // Défauts de cycle (M9-16) — pré-remplissage de la saisie de fin
+  // d'ensemencement. Sous `recettes:read` et non `parametres:read` : ces quatre
+  // durées sont des paramètres **brassicoles** (la garde est une décision de
+  // brasseur), pas des réglages d'administration — et `parametres` est
+  // `brasseur: NONE`, ce qui refuserait précisément l'utilisateur concerné.
+  // Aucune ressource nouvelle, la matrice §3.5 reste figée (ADR-10).
+  app.get(
+    "/batches/:id/cycle-defaults",
+    { config: app.rbac("recettes", "read") },
+    async (request) => {
+      const { id } = idParams.parse(request.params);
+      return { defaults: await service.cycleDefaults(id) };
+    },
+  );
+
   app.get("/batches/:id/milestones", { config: app.rbac("recettes", "read") }, async (request) => {
     const { id } = idParams.parse(request.params);
     return { milestones: await service.listMilestones(id) };

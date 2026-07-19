@@ -756,6 +756,24 @@ export interface BatchMilestone {
   sortOrder: number;
 }
 
+/**
+ * Défauts de cycle applicables à un brassin (miroir de `CycleDefaultsView`,
+ * M9-16) : de quoi pré-remplir la saisie de fin d'ensemencement **et** en
+ * calculer l'aperçu daté avec `buildBatchMilestones` de `@brasso/core`.
+ *
+ * `timezone` est celui de l'instance, pas celui du navigateur : une tablette
+ * d'atelier mal réglée ne doit pas décaler les jalons annoncés.
+ */
+export interface BatchCycleDefaults {
+  timezone: string;
+  fermentationDays: number;
+  dryHopDays: number;
+  coldCrashDays: number;
+  gardeDays: number;
+  /** La recette figée du brassin porte-t-elle un dry hop ? Décidé par `core`. */
+  hasDryHop: boolean;
+}
+
 /** Un maillon de la chaîne des volumes (M9-06). */
 export interface VolumeStep {
   volumeL: number | null;
@@ -796,6 +814,12 @@ export const batchesApi = {
   milestones: (id: string): Promise<BatchMilestone[]> =>
     request<{ milestones: BatchMilestone[] }>(`/api/batches/${id}/milestones`).then(
       (r) => r.milestones,
+    ),
+
+  /** Défauts de cycle du brassin : durées, fuseau de l'instance, dry hop (M9-16). */
+  cycleDefaults: (id: string): Promise<BatchCycleDefaults> =>
+    request<{ defaults: BatchCycleDefaults }>(`/api/batches/${id}/cycle-defaults`).then(
+      (r) => r.defaults,
     ),
 
   /** Chaîne des volumes et rendement de conditionnement (M9-06/07). */

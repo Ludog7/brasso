@@ -17,6 +17,7 @@ export const batchKeys = {
   overview: (filters: BatchOverviewFilters) => ["batches", "overview", filters] as const,
   milestones: (id: string) => ["batches", "milestones", id] as const,
   volumes: (id: string) => ["batches", "volumes", id] as const,
+  cycleDefaults: (id: string) => ["batches", "cycle-defaults", id] as const,
 };
 
 /**
@@ -40,6 +41,23 @@ export function useBatchMilestones(id: string | undefined) {
     queryKey: batchKeys.milestones(id ?? ""),
     queryFn: () => batchesApi.milestones(id as string),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Défauts de cycle d'un brassin (M9-16) : durées à pré-remplir, fuseau de
+ * l'instance et présence d'un dry hop.
+ *
+ * `staleTime` long : ce sont des réglages d'instance et une recette figée, rien
+ * qui bouge pendant qu'on remplit un formulaire. Les recharger à chaque focus
+ * ferait clignoter un formulaire ouvert en fin de Jour J.
+ */
+export function useBatchCycleDefaults(id: string | undefined) {
+  return useQuery({
+    queryKey: batchKeys.cycleDefaults(id ?? ""),
+    queryFn: () => batchesApi.cycleDefaults(id as string),
+    enabled: Boolean(id),
+    staleTime: 5 * 60_000,
   });
 }
 
