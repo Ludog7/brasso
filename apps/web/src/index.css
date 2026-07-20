@@ -38,13 +38,24 @@
    * se dérivent par modulation d'opacité — `text-warning`, `bg-warning/10`,
    * `border-warning/40`. Un jeton par usage serait une prolifération inutile.
    *
-   * Luminosité calée sur le **pire fond réellement utilisé** — le texte du jeton
-   * posé sur un aplat du même jeton à 20 % (badge d'anomalies du hub). À
-   * L=0.55 ce cas tombait à 4,42:1, sous le seuil AA ; à L=0.50 il passe à
-   * 4,61:1. Mesurer sur le fond uni aurait laissé filer le défaut.
+   * Luminosité calée sur le **pire fond réellement utilisé** : le texte du jeton
+   * posé sur un aplat du même jeton à 20 % (badge d'anomalies du hub), et ce
+   * **sur `--background`** — pas sur `--card`.
+   *
+   * La distinction n'est pas théorique, elle a piégé deux fois de suite. À
+   * L=0.55 le cas /20 tombait à 4,42:1 alors que le fond uni donnait 5:1. Puis
+   * L=0.50, mesuré sur `--card`, donnait 4,61:1 — conforme en apparence, mais
+   * 4,49:1 sur `--background`, le fond où le badge est réellement rendu (le
+   * `Button variant="outline"` est transparent, la carte n'intervient pas).
+   * `--background` (L 0.99) est très légèrement plus sombre que `--card` (L 1)
+   * et cela suffit à passer sous le seuil.
+   *
+   * Valeurs actuelles, /20 sur `--background` : warning 4,66:1, success 4,65:1.
+   * La marge au-dessus de 4,5 est délibérée — se caler au ras du seuil rend
+   * n'importe quel futur ajustement de fond silencieusement non conforme.
    */
-  --warning: oklch(0.5 0.14 60);
-  --success: oklch(0.47 0.12 165);
+  --warning: oklch(0.49 0.14 60);
+  --success: oklch(0.46 0.12 165);
 
   /* Couleurs des courbes de suivi (M3-10) — contrastées sur `--card`. */
   --chart-gravity: oklch(0.52 0.16 150);
