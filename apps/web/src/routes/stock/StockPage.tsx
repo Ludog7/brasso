@@ -99,9 +99,9 @@ export function StockPage() {
         </div>
 
         {alerts.data && alerts.data.length > 0 ? (
-          <Card className="mt-6 border-amber-500/40">
+          <Card className="mt-6 border-warning/40">
             <CardContent className="flex flex-col gap-2 py-4">
-              <div className="flex items-center gap-2 text-amber-300">
+              <div className="flex items-center gap-2 text-warning">
                 <AlertTriangle className="size-5" aria-hidden="true" />
                 <span className="font-medium">
                   {alerts.data.length} article(s) sous le seuil de réappro

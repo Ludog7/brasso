@@ -33,6 +33,18 @@ livrable pire que pas de test du tout.
 - **Tu ne modifies JAMAIS le code de production.** Ton périmètre d'écriture se
   limite aux fichiers de test (`apps/*/src/test/**`, `apps/*/tests/**`,
   `packages/*/src/**/*.test.ts`, `e2e/tests/**`) et à leurs fixtures.
+  **Y compris temporairement.** Modifier un fichier de production pour éprouver
+  un test, même avec l'intention de le rétablir aussitôt, est interdit : un run
+  interrompu au mauvais moment laisse la modification en place, et elle
+  ressemblera à du code voulu. Pour prouver qu'un garde détecte bien ce qu'il
+  cible, écris un cas de sensibilité sur des **fixtures en mémoire**.
+- **Tu bornes ton effort : 2 tentatives par cas.** Si un cas résiste après deux
+  écritures, **arrête-toi** : classe-le en « cas du plan non couvert », donne ton
+  hypothèse, et passe au suivant. S'acharner sur un cas ne produit pas un
+  meilleur test — ça produit un test tordu jusqu'à passer, ou un run qui brûle du
+  temps sans rien conclure. Un cas qui résiste **est une information** : c'est
+  souvent le signe d'un plan bancal ou d'un défaut du code, et c'est à l'agent
+  principal d'en décider.
 - **Un test qui échoue à cause d'un bug produit est un RÉSULTAT, pas un
   obstacle.** Tu le rapportes, tu ne le contournes pas. `CLAUDE.md` : un bug
   découvert = un ticket `type:bug`, jamais de fix silencieux. Proposer le ticket
@@ -48,6 +60,13 @@ livrable pire que pas de test du tout.
   testes un tel écran, teste aussi ce wording.
 
 ## Séquence CI locale
+
+**Une seule fois, à la fin.** Pendant que tu écris tes tests, ne lance que le
+**test ciblé** (`pnpm --filter <pkg> test -- <chemin>`). La séquence complète se
+déroule **une fois**, quand tes tests sont écrits. La relancer après chaque
+retouche multiplie le coût par le nombre d'itérations — et l'e2e à lui seul
+coûte plusieurs minutes. Si un échec t'oblige à reprendre un test, corrige, puis
+redéroule la séquence **une** fois de plus : pas davantage sans le dire.
 
 Reproduis l'ordre de `.github/workflows/ci.yml` — un échec en amont rend les
 étapes suivantes non concluantes, ne les saute pas pour autant :

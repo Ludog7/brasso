@@ -47,7 +47,7 @@ export function StockToaster() {
           role="status"
           className="pointer-events-auto flex max-w-md items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-card-foreground shadow-lg"
         >
-          <CheckCircle2 className="size-5 shrink-0 text-emerald-400" aria-hidden="true" />
+          <CheckCircle2 className="size-5 shrink-0 text-success" aria-hidden="true" />
           <span className="flex-1 text-sm">{toast.message}</span>
           <button
             type="button"

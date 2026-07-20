@@ -66,7 +66,7 @@ const STATE_TONE: Record<MilestoneState, "success" | "accent" | "muted"> = {
 };
 
 function StateIcon({ state }: { state: MilestoneState }) {
-  if (state === "done") return <Check className="size-5 text-emerald-300" aria-hidden="true" />;
+  if (state === "done") return <Check className="size-5 text-success" aria-hidden="true" />;
   if (state === "current") return <PlayCircle className="size-5 text-primary" aria-hidden="true" />;
   return <CircleDashed className="size-5 text-muted-foreground" aria-hidden="true" />;
 }

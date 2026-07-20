@@ -100,7 +100,7 @@ function CostBody({ cost }: { cost: BatchCost }) {
       </ul>
 
       {cost.missingCostLines > 0 ? (
-        <p role="note" className="text-sm text-amber-300">
+        <p role="note" className="text-sm text-warning">
           {cost.missingCostLines} ingrédient{cost.missingCostLines > 1 ? "s" : ""} sans coût de
           référence — total sous-estimé.
         </p>

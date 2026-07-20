@@ -27,7 +27,7 @@ export function OfflineBanner({ batchId }: { batchId: string }) {
     return (
       <div
         role="status"
-        className="flex items-center justify-center gap-2 bg-amber-500/15 px-4 py-2 text-center text-sm text-amber-200"
+        className="flex items-center justify-center gap-2 bg-warning/15 px-4 py-2 text-center text-sm text-warning"
       >
         <CloudOff className="size-4 shrink-0" aria-hidden="true" />
         <span>{message}</span>

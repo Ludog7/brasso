@@ -65,7 +65,7 @@ export function ForceStepDialog({
         className="flex w-full max-w-md flex-col gap-5 rounded-lg border border-border bg-background p-6 text-left shadow-xl"
       >
         <div className="flex items-center gap-3">
-          <AlertTriangle className="size-6 text-amber-400" aria-hidden="true" />
+          <AlertTriangle className="size-6 text-warning" aria-hidden="true" />
           <h2 id={titleId} className="text-xl font-semibold">
             Forcer l'étape
           </h2>

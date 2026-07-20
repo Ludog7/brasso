@@ -62,7 +62,7 @@ export function ContributionsPage() {
       {reconciledMsg ? (
         <div
           role="status"
-          className="mt-4 flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300"
+          className="mt-4 flex items-center gap-2 rounded-md border border-success/40 bg-success/10 px-4 py-3 text-sm text-success"
         >
           <CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />
           <span>{reconciledMsg}</span>

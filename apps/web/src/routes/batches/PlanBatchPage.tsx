@@ -178,7 +178,7 @@ export function PlanBatchPage() {
                       />
                     </dl>
                     {preview.warnings.length > 0 ? (
-                      <ul className="mt-4 flex flex-col gap-1 text-sm text-amber-200">
+                      <ul className="mt-4 flex flex-col gap-1 text-sm text-warning">
                         {preview.warnings.map((w) => (
                           <li key={w} role="alert">
                             ⚠ {w}

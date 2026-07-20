@@ -192,7 +192,7 @@ export function AltEditor({ recipe }: AltEditorProps) {
             {!readOnly && !result.publication.publishable ? (
               <div
                 role="status"
-                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+                className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
               >
                 <p className="font-medium">Publication impossible en l'état :</p>
                 <ul className="mt-1 list-inside list-disc">
@@ -200,7 +200,7 @@ export function AltEditor({ recipe }: AltEditorProps) {
                     <li key={error}>{error}</li>
                   ))}
                 </ul>
-                <p className="mt-1 text-xs text-amber-200/80">
+                <p className="mt-1 text-xs text-warning/80">
                   Complète ces points, puis publie depuis la page de la recette (contrôle appliqué
                   au serveur).
                 </p>

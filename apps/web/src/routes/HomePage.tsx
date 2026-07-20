@@ -121,7 +121,7 @@ export function HomePage() {
                 Anomalies
                 {openAlertCount > 0 ? (
                   <span
-                    className="ml-1 inline-flex min-w-6 items-center justify-center rounded-full bg-amber-500/20 px-2 py-0.5 text-sm font-semibold text-amber-300"
+                    className="ml-1 inline-flex min-w-6 items-center justify-center rounded-full bg-warning/20 px-2 py-0.5 text-sm font-semibold text-warning"
                     aria-label={`${openAlertCount} anomalie(s) ouverte(s)`}
                   >
                     {openAlertCount}

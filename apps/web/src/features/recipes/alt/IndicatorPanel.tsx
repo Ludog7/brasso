@@ -143,7 +143,7 @@ export function IndicatorPanel({
             <div
               className={`rounded-md border px-3 py-2 text-sm ${
                 ph.status === "low_acid"
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+                  ? "border-warning/40 bg-warning/10 text-warning"
                   : "border-border bg-muted/40 text-muted-foreground"
               }`}
             >

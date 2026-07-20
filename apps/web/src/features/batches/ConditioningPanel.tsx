@@ -155,7 +155,7 @@ function ConditioningLine({ batchId, line }: { batchId: string; line: PackagingL
 
       {line.availableForSaleDate !== null ? (
         <p className="flex items-start gap-2 text-sm">
-          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" aria-hidden="true" />
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />
           <span>
             Mise en vente estimée au{" "}
             <strong className="font-medium">{formatDate(line.availableForSaleDate)}</strong>
@@ -204,7 +204,7 @@ function CarbonationReadingForm({ batchId, line }: { batchId: string; line: Pack
   // cible. On le dit plutôt que d'offrir une saisie trompeuse.
   if (co2 === null || co2 <= 0) {
     return (
-      <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+      <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <span>
           Aucun CO₂ visé n&apos;a été saisi pour ce contenant : la pression cible ne peut pas être
@@ -386,7 +386,7 @@ function Verdict({ verdict }: { verdict: CarbonationReadingResult }) {
     return (
       <div
         role="status"
-        className="flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200"
+        className="flex items-start gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success"
       >
         <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <span>
@@ -400,7 +400,7 @@ function Verdict({ verdict }: { verdict: CarbonationReadingResult }) {
   return (
     <div
       role="status"
-      className="flex flex-col gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200"
+      className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning"
     >
       <span className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
