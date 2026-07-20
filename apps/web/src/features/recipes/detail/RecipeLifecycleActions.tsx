@@ -119,7 +119,7 @@ export function RecipeLifecycleActions({ recipe }: { recipe: RecipeDetail }) {
       {missing !== null ? (
         <div
           role="alert"
-          className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+          className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
         >
           <p className="font-medium">Publication impossible en l'état — à compléter :</p>
           <ul className="list-disc pl-5">
@@ -127,7 +127,7 @@ export function RecipeLifecycleActions({ recipe }: { recipe: RecipeDetail }) {
               <li key={m}>{m}</li>
             ))}
           </ul>
-          <p className="text-xs text-amber-200/80">
+          <p className="text-xs text-warning/80">
             Corrige ces points dans l'éditeur (« Modifier »), puis publie à nouveau.
           </p>
         </div>

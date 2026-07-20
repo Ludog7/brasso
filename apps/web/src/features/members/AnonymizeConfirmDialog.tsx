@@ -79,7 +79,7 @@ export function AnonymizeConfirmDialog({
             type="button"
             onClick={submit}
             disabled={!canConfirm}
-            className="bg-red-600 text-white hover:bg-red-500"
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             {anonymize.isPending ? (
               <Loader2 className="size-5 animate-spin" aria-hidden="true" />

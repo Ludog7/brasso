@@ -123,7 +123,7 @@ export function HopSchedule({ step, state }: { step: StepSpec; state: DayState }
         <p
           key={item.key}
           role="status"
-          className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-left text-sm"
+          className="rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-left text-sm"
         >
           Prépare la pesée : {item.addition.name} · {formatAmount(item.addition.amountG)} —{" "}
           {formatDeadline(item)}.
@@ -151,7 +151,7 @@ export function HopSchedule({ step, state }: { step: StepSpec; state: DayState }
               </span>
             )}
             {item.addition.inconsistent ? (
-              <span role="note" className="text-amber-300">
+              <span role="note" className="text-warning">
                 échéance au-delà de la durée d'ébullition déclarée
               </span>
             ) : null}

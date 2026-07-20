@@ -114,7 +114,7 @@ export function CalcSection({
 /** Message d'erreur de saisie, listant les champs à vérifier. Ne masque pas le formulaire. */
 export function InvalidHint({ fields }: { fields: string[] }) {
   return (
-    <p role="alert" className="text-sm text-amber-600 dark:text-amber-400">
+    <p role="alert" className="text-sm text-warning">
       {fields.length > 0
         ? `À vérifier : ${fields.join(", ")}.`
         : "Complétez les champs pour obtenir un résultat."}

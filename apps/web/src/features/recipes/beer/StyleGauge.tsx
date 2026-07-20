@@ -3,9 +3,9 @@ import type { GaugeStatus } from "@brasso/core";
 import { cn } from "@/lib/utils";
 
 const STATUS_META: Record<GaugeStatus, { label: string; dot: string; text: string }> = {
-  in_range: { label: "dans la plage", dot: "bg-emerald-400", text: "text-emerald-300" },
-  below: { label: "sous la plage", dot: "bg-amber-400", text: "text-amber-300" },
-  above: { label: "au-dessus", dot: "bg-red-400", text: "text-red-300" },
+  in_range: { label: "dans la plage", dot: "bg-success", text: "text-success" },
+  below: { label: "sous la plage", dot: "bg-warning", text: "text-warning" },
+  above: { label: "au-dessus", dot: "bg-destructive", text: "text-destructive" },
   unknown: { label: "hors style", dot: "bg-muted-foreground", text: "text-muted-foreground" },
 };
 

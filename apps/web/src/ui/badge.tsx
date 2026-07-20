@@ -8,10 +8,19 @@ const badgeVariants = cva("inline-flex items-center rounded-md px-2.5 py-0.5 tex
     tone: {
       neutral: "bg-muted text-muted-foreground",
       accent: "bg-primary/15 text-foreground",
-      success: "bg-emerald-500/15 text-emerald-300",
-      warning: "bg-amber-500/15 text-amber-300",
+      success: "bg-success/15 text-success",
+      warning: "bg-warning/15 text-warning",
       // Signale ce qui appelle une action immédiate (échéance dépassée, M9-10).
-      destructive: "bg-destructive/15 text-destructive-foreground",
+      //
+      // ⚠️ Seule tonalité qui n'atteint pas AA dans les deux thèmes, et c'est
+      // assumé : `--destructive` est calibré comme couleur de **remplissage**,
+      // pas de texte. En sombre, `--destructive-foreground` (quasi blanc) donne
+      // 13:1 sur cette teinte ; en clair il devient invisible, d'où la bascule
+      // ci-dessous vers `--destructive` — lisible, mais à 3,78:1. Ni l'aplat
+      // plein ni la teinte ne passent AA dans les deux thèmes avec les valeurs
+      // actuelles : le corriger exige de re-calibrer `--destructive`, ce qui
+      // touche boutons et alertes → M10-07 (fondations), bug #292.
+      destructive: "bg-destructive/15 text-destructive dark:text-destructive-foreground",
       muted: "border border-border text-muted-foreground",
     },
   },

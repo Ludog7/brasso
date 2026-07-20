@@ -130,6 +130,19 @@ passe un **plan de test** (la liste des cas, tirée de la DoD du ticket). L'agen
 Un NO-GO se traite en corrigeant le code (agent principal), puis en le
 relançant — pas en discutant le verdict.
 
+**Plafond sur la boucle : au 2ᵉ NO-GO sur un même ticket, on s'arrête et on
+remonte à Ludo.** Un premier NO-GO est le fonctionnement normal du cycle : il
+signale un défaut, on corrige, on relance. Un second sur le même ticket ne dit
+généralement plus « il reste un bug » mais « le ticket est mal cadré » ou « le
+plan de test est bancal ». Continuer à relancer à ce stade coûte cher et masque
+le vrai problème : c'est l'agent principal qui boucle, pas le testeur. On expose
+alors les deux verdicts et on décide — re-cadrer le ticket, revoir le plan, ou
+scinder.
+
+**Bornes côté testeur** (dans son fichier de rôle) : 2 tentatives d'écriture par
+cas avant de le classer « non couvert », et **une seule** séquence CI complète,
+déroulée en fin de run — pas après chaque retouche.
+
 ## Pièges connus
 
 - **CRLF / Windows** : `core.autocrlf=true` fait échouer `pnpm format:check` **en
