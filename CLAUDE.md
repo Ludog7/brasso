@@ -12,6 +12,7 @@
 - **Un ticket = une branche = une PR.** Jamais de commit direct sur `main`. Branche : `feat/<n°issue>-<slug>` (ex. `feat/42-state-machine-timers`). PR avec template rempli et `Closes #42`.
 - **`main` est protégée** : merge uniquement par PR avec CI verte (lint + tests + build). Squash merge.
 - **Tests obligatoires** pour tout code dans `packages/core`. **Couverture ≥ 90 %.** Chaque formule est validée contre les valeurs de référence de `FORMULES-BRASSICOLES.md`.
+- **La phase de test se délègue à l'agent `testeur`** (`.claude/agents/testeur.md`, Sonnet) : tu lui passes un **plan de test** (les cas à asservir, tirés de la DoD), il écrit les tests, déroule la séquence CI locale et rend un **verdict GO/NO-GO**. Il n'écrit jamais de code de production et ne corrige jamais un bug — il le rapporte, tu ouvres le ticket. Détail du cycle : `docs/DEV.md` § Flux de contribution.
 - **Un bug découvert = un ticket `type:bug`** rattaché au milestone courant. Jamais de fix silencieux hors périmètre du ticket en cours.
 
 ## Conventions techniques

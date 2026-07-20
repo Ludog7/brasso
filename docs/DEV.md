@@ -100,9 +100,35 @@ l'ordre** (reproductibles en local pour éviter un aller-retour) :
 
 1. **Un ticket = une branche = une PR.** Jamais de commit direct sur `main`.
 2. Branche `feat/<n°issue>-<slug>` (ex. `feat/102-core-plan-jourj-schemas`).
-3. PR : remplir le template (`.github/pull_request_template.md`), `Closes #<n>`.
-4. CI verte → **squash merge** + suppression de branche (`gh pr merge <n> --squash --delete-branch`).
-5. Un bug hors périmètre = un ticket `type:bug` sur le milestone courant, jamais de fix silencieux.
+3. Implémenter le ticket.
+4. **Phase de test → agent `testeur`** (voir ci-dessous). Verdict GO avant commit.
+5. PR : remplir le template (`.github/pull_request_template.md`), `Closes #<n>`.
+6. CI verte → **squash merge** + suppression de branche (`gh pr merge <n> --squash --delete-branch`).
+7. Un bug hors périmètre = un ticket `type:bug` sur le milestone courant, jamais de fix silencieux.
+
+### Phase de test — agent `testeur` (Sonnet)
+
+`.claude/agents/testeur.md`. La phase de test est **déléguée à Sonnet** : c'est
+un travail d'implémentation et d'exécution volumineux, pas de conception.
+
+**Partage des rôles.** L'agent principal décide *ce qui doit être prouvé* et lui
+passe un **plan de test** (la liste des cas, tirée de la DoD du ticket). L'agent
+`testeur` écrit ces tests, déroule la séquence CI locale complète (Prettier →
+`format:check` → `lint` → `typecheck` → `test` → `build` → `test:e2e`) et rend un
+**verdict GO/NO-GO** au format imposé par son fichier de rôle.
+
+**Ce qu'il ne fait pas** — et c'est ce qui rend la délégation sûre :
+
+- il **ne touche pas au code de production** (périmètre d'écriture = fichiers de
+  test et fixtures) ;
+- il **ne corrige aucun bug** qu'il découvre : il le rapporte en « bug candidat »
+  avec une gravité proposée, l'ouverture du ticket reste à l'agent principal ;
+- il **n'affaiblit aucun test** pour le faire passer (`.skip`, assertion
+  relâchée, cas supprimé) ;
+- il **ne tranche aucune ambiguïté** du plan : il s'arrête et rapporte.
+
+Un NO-GO se traite en corrigeant le code (agent principal), puis en le
+relançant — pas en discutant le verdict.
 
 ## Pièges connus
 
