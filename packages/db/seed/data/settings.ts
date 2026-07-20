@@ -48,4 +48,20 @@ export const SETTINGS_SEED = {
   timezone: "Europe/Paris",
   /** Durée de validité d'une cotisation (jours) — adhésion annuelle (M6). */
   membershipPeriodDays: 365,
+
+  /**
+   * Couleur de marque (M10-04). Ce n'est pas une couleur choisie au hasard :
+   * c'est le **cas nominal chiffré d'ADR-14 §3**, celui qui tient les deux
+   * thèmes sans aucun ajustement —
+   * - thème **clair** (le défaut, ADR-14) : texte dérivé clair, **4,98:1** ;
+   * - thème **sombre** : texte dérivé sombre, **4,70:1** ;
+   * - accent sur le fond : 4,98:1 en clair, 3,79:1 en sombre, **inchangé** dans
+   *   les deux cas.
+   *
+   * Seeder une couleur du cas nominal est délibéré : une base de dev doit
+   * démarrer sur un thème lisible, pas sur un cas limite qui ferait passer un
+   * défaut d'affichage pour un choix. Les cas d'ajustement et d'échec sont
+   * éprouvés par les tests, pas par le seed.
+   */
+  brandColor: "#2E7D32",
 } as const;

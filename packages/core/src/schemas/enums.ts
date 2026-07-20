@@ -146,6 +146,14 @@ export const integrationAlertStatusSchema = z.enum(["OPEN", "RESOLVED"]);
 /** Mode de rendu d'un écran d'affichage (Prisma `DisplayTemplate`, M7-02, §Templates). */
 export const displayTemplateSchema = z.enum(["LIST", "TABLE", "CARDS"]);
 
+/**
+ * Méthode d'ouverture d'une session (Prisma `AuthMethod`, M10-04, ADR-13 §6).
+ * Une session ouverte par PIN offre une garantie d'identité **plus faible**
+ * qu'une session par mot de passe : la distinguer est ce qui permet à l'audit
+ * de rester interprétable.
+ */
+export const authMethodSchema = z.enum(["PASSWORD", "PIN"]);
+
 export type RecipeEngine = z.infer<typeof recipeEngineSchema>;
 export type RecipeStatus = z.infer<typeof recipeStatusSchema>;
 export type IngredientCategory = z.infer<typeof ingredientCategorySchema>;
@@ -167,3 +175,4 @@ export type ExternalTransactionStatus = z.infer<typeof externalTransactionStatus
 export type IntegrationAlertType = z.infer<typeof integrationAlertTypeSchema>;
 export type IntegrationAlertStatus = z.infer<typeof integrationAlertStatusSchema>;
 export type DisplayTemplate = z.infer<typeof displayTemplateSchema>;
+export type AuthMethod = z.infer<typeof authMethodSchema>;
