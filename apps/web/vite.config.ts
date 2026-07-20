@@ -25,8 +25,11 @@ export default defineConfig({
         orientation: "any",
         start_url: "/",
         scope: "/",
-        background_color: "#0f1512",
-        theme_color: "#0f1512",
+        // Accordés au thème clair par défaut (ADR-14) : sans cela, l'app
+        // installée afficherait un écran de démarrage sombre avant de virer au
+        // clair au premier rendu.
+        background_color: "#fcfcfc",
+        theme_color: "#fcfcfc",
         icons: [
           {
             src: "pwa-icon.svg",
