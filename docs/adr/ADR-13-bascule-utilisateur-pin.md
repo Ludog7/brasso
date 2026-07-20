@@ -99,8 +99,17 @@ Le contrôle est **serveur**. Un contrôle purement client se contourne avec l'o
 - **Compte sans PIN** : **absent du sélecteur**. Il se connecte par la page de connexion habituelle, mot de passe. Une tuile inerte dans le sélecteur serait un cul-de-sac ; l'écran porte un lien « se connecter autrement » qui y mène.
 - **Radiation d'un compte** : `pinHash` effacé et **toutes les sessions révoquées** dans la même transaction.
 
-> **Tranché par Ludo le 2026-07-20 — promotion au rôle `admin` d'un compte porteur d'un PIN à 4 chiffres : renouvellement forcé à la prochaine bascule.**
-> Le PIN à 4 chiffres reste valide ; à la bascule suivante, l'utilisateur doit poser un PIN à 6 chiffres avant d'accéder à sa session. La conséquence est assumée et décrite au §« Conséquences négatives ».
+> **Tranché par Ludo le 2026-07-20 — promotion au rôle `admin` d'un compte porteur d'un PIN à 4 chiffres : renouvellement forcé à la prochaine ouverture de session.**
+>
+> Le déclencheur est **toute authentification** — bascule par PIN **ou** connexion depuis la page d'accueil — et non la seule relève de poste. Séquence imposée :
+>
+> 1. le PIN **à 4 chiffres existant est accepté** pour cette authentification ;
+> 2. **avant tout accès à la session**, un écran bloquant exige la pose d'un PIN à **6** chiffres ;
+> 3. la session ne s'ouvre qu'une fois le nouveau PIN posé. Pas de report, pas de « plus tard ».
+>
+> **Pourquoi le PIN à 4 chiffres doit rester accepté à cette étape** : le changement de rôle est fait **par un autre admin**, potentiellement en l'absence de l'intéressé. Invalider le PIN à la seconde de la promotion enfermerait le nouvel admin dehors — il ne pourrait plus s'authentifier pour poser le PIN à 6 chiffres qu'on lui demande. Le PIN court sert donc **une dernière fois**, et uniquement à franchir cette porte.
+
+**Sessions déjà ouvertes au moment de la promotion.** Elles ne sont pas interrompues : le rôle prend effet immédiatement sur les droits, mais le PIN est un **moyen d'authentification**, pas un droit — il n'y a rien à ré-évaluer sur une session déjà ouverte. Le renouvellement s'impose à l'authentification **suivante**, qui viendra au plus tard à l'expiration de la session en cours (§4).
 
 ### 6. Traçabilité
 
@@ -122,15 +131,21 @@ La bascule par PIN ouvre une session avec **les droits du rôle de l'utilisateur
 
 ### Sur le schéma (M10-04, #295)
 
-`User` gagne : `pinHash` (nullable — l'absence de PIN est un état normal), `pinUpdatedAt`, et les métadonnées de verrouillage (compteur d'échecs, début de fenêtre, échéance du verrou). La session gagne sa **méthode d'authentification**.
+`User` gagne : `pinHash` (nullable — l'absence de PIN est un état normal), `pinUpdatedAt`, les métadonnées de verrouillage (compteur d'échecs, début de fenêtre, échéance du verrou), et un **marqueur de renouvellement dû**. La session gagne sa **méthode d'authentification**.
+
+Ce marqueur n'est pas un confort d'implémentation : **un hash Argon2id ne révèle pas la longueur du secret qu'il protège.** Rien ne permet donc de déduire d'un `pinHash` qu'il couvre 4 chiffres et non 6. Sans marqueur posé au moment où le rôle `admin` est accordé, la règle du §5 serait invérifiable — ou obligerait à stocker la longueur du PIN, c'est-à-dire une information sur le secret lui-même. Un booléen porté par l'attribution du rôle est à la fois plus simple et plus sobre.
 
 ### Sur l'API (M10-06, #297)
 
 Tous les nombres de cet ADR sont **posés** : 4 / 6 chiffres, 5 échecs, fenêtre 15 min, verrou 5 → 30 min, remise à zéro 60 min, session 12 h, inactivité 10 min. M10-06 écrit ses tests de rate-limit **sans avoir à choisir un seul nombre**. Les routes de bascule déclarent leur couple `(ressource, action)` comme toutes les autres.
 
+**L'attribution du rôle `admin` pose le marqueur de renouvellement** ; l'authentification qui suit réussit mais **ne délivre pas de session** — elle rend un état « renouvellement requis » que le client doit traiter. La session n'est créée qu'une fois le PIN à 6 chiffres accepté. Écrit autrement : le chemin qui saute l'écran de renouvellement ne doit pas exister côté serveur, faute de quoi il finira par exister côté client.
+
 ### Sur l'UI (M10-09, #300)
 
 Sélecteur listant les comptes **ayant un PIN**, nom d'affichage seul ; pavé numérique ; validation au dernier chiffre ; message de verrouillage indiquant **le temps restant** (et non « contactez un administrateur », qui serait faux) ; lien « se connecter autrement ».
+
+**Écran de renouvellement obligatoire** (§5) : présenté après une authentification réussie portant le marqueur, **sans échappatoire** — ni « plus tard », ni fermeture, ni navigation latérale. Il dit pourquoi il apparaît (« votre compte est devenu administrateur : votre code passe à 6 chiffres »), applique les mêmes refus de PIN triviaux, et ne rend la main qu'une fois le nouveau PIN accepté.
 
 ### Sur les tests
 
@@ -139,6 +154,6 @@ Chaque valeur du §3 est asservie par un test : le 5ᵉ échec verrouille, le 4�
 ### Conséquences négatives assumées
 
 - **À privilège égal, une session ouverte par PIN offre une garantie d'identité plus faible qu'une session par mot de passe.** Les mesures compensatoires — session courte, verrouillage, temporisation, audit distinct, PIN triviaux interdits — **ne suppriment pas ce fait, elles le bornent**. Un ADR qui prétendrait l'inverse serait faux, et c'est exactement le genre de faux confort qu'ADR-11 nous apprend à refuser ailleurs.
-- **La fenêtre d'exposition ouverte par la promotion au rôle `admin` n'est pas bornée dans le temps.** Le renouvellement se déclenche à la prochaine bascule ; un administrateur qui ne bascule jamais conserve un PIN à 4 chiffres indéfiniment, ce qui vide de son effet la différenciation actée au §1 pour ce compte précis. C'est le prix du choix retenu — invalider le PIN à la seconde de la promotion l'aurait fermée, au prix d'un compte brutalement retiré du sélecteur sans préavis.
+- **Après une promotion au rôle `admin`, le PIN à 4 chiffres est encore accepté une fois.** La fenêtre est bornée — elle se ferme à la première authentification, qui n'ouvre aucun accès sans renouvellement — mais elle n'est pas nulle. Le risque résiduel, nommé : quelqu'un qui aurait **observé** ce PIN à 4 chiffres et qui atteint la tablette **avant** le nouvel admin peut s'authentifier à sa place et poser lui-même le PIN à 6 chiffres. Deux choses le bornent à leur tour — le légitime se retrouve dehors et s'en aperçoit **immédiatement**, et la pose de PIN est **journalisée** (§6), donc l'événement est visible après coup. À noter enfin que cet observateur pouvait déjà utiliser ce PIN **avant** la promotion : ce que la promotion ajoute, ce ne sont pas de nouvelles conditions d'attaque, ce sont les droits qu'elle rapporte.
 - **Les comptes ayant un PIN sont énumérables** depuis l'écran de bascule, sans authentification préalable sur ce poste.
 - **Deux durées de session coexistent** (12 h et 7 jours) : toute évolution de la gestion de session devra traiter les deux cas, et un test qui n'en couvrirait qu'un laisserait passer une régression sur l'autre.
