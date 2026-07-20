@@ -33,6 +33,7 @@ async function seedSettings(): Promise<void> {
     timezone: SETTINGS_SEED.timezone,
     membershipPeriodDays: SETTINGS_SEED.membershipPeriodDays,
     defaultWaterProfile: { ...DEFAULT_WATER_PROFILE },
+    brandColor: SETTINGS_SEED.brandColor,
   };
   await prisma.settings.upsert({
     where: { id: SETTINGS_SEED.id },

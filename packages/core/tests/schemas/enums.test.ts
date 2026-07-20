@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  authMethodSchema,
   batchMilestoneKindSchema,
   batchStatusSchema,
   catalogKindSchema,
+  displayTemplateSchema,
   ingredientCategorySchema,
   measureTypeSchema,
   recipeEngineSchema,
@@ -80,6 +82,25 @@ describe("Enums Zod — alignés Prisma (M1-01)", () => {
       for (const kind of batchMilestoneKindSchema.options) {
         expect(dayPhases).not.toContain(kind);
       }
+    });
+  });
+
+  describe("options & identité (M10-04) — miroir des enums Prisma étendus", () => {
+    it("authMethod = exactement PASSWORD/PIN, dans l'ordre de l'enum Prisma", () => {
+      // Miroir de `enum AuthMethod { PASSWORD PIN }` (schema.prisma) : une
+      // session ouverte par PIN doit rester distinguable d'une session par mot
+      // de passe (ADR-13 §6) — toute divergence de valeurs casserait ce miroir
+      // silencieusement (ADR-03/04).
+      expect(authMethodSchema.options).toEqual(["PASSWORD", "PIN"]);
+      expect(authMethodSchema.parse("PIN")).toBe("PIN");
+      expect(authMethodSchema.safeParse("SSO").success).toBe(false);
+    });
+
+    it("displayTemplate n'a pas gagné de gabarit (non-régression, M10-04 §E)", () => {
+      // Le ticket interdit explicitement tout nouvel enum de gabarit : la
+      // demande M10 est de l'injection de marque (`defaultDisplayTemplate`
+      // réutilise cet enum existant), pas une nouvelle famille de rendu.
+      expect(displayTemplateSchema.options).toEqual(["LIST", "TABLE", "CARDS"]);
     });
   });
 });

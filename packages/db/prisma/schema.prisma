@@ -314,6 +314,53 @@ model Settings {
   /// **indicateur d'aide à la décision**, jamais une garantie de stérilité.
   coolingCircuitSanitizeLeadMin Int @default(5)
 
+  // ── Apparence / identité (M10-04, ADR-14) ──────────────────────────────────
+
+  /// Couleur de marque, en hexadécimal **`#RRGGBB` majuscule** (ex. `#2E7D32`).
+  /// `null` = pas encore configurée : l'instance retombe sur ses jetons par
+  /// défaut. ADR-14 fixe la **dérivation** (OKLCH, contraste WCAG 2.1, seuils
+  /// 4,5:1 et 3:1) ; elle est calculée à l'affichage, **jamais stockée** — une
+  /// couleur dérivée figée en base se désynchroniserait du jour où les jetons
+  /// de fond changent.
+  brandColor String?
+
+  /// **Chemin** du logo sur le volume local, relatif au répertoire de médias —
+  /// jamais l'image elle-même (§9.2 Q8, comme la photo de membre). Un blob en
+  /// base gonfle chaque sauvegarde logique et complique la restauration.
+  /// Bornes appliquées à l'**upload** (M10-05), pas au schéma car ce sont des
+  /// paramètres et non de l'état : formats `image/png`, `image/jpeg`,
+  /// `image/svg+xml` ; taille maximale **1 Mio**.
+  logoPath String?
+
+  /// Thème par défaut : **aucune colonne, volontairement.** ADR-14 §5 tranche
+  /// que la préférence de thème est **par poste** (stockage local, appliquée au
+  /// premier rendu sans attendre le serveur — ADR-08, pas de flash hors ligne)
+  /// et que le défaut « clair » est **en dur**. Une colonne ici serait un
+  /// troisième concept sans porteur.
+
+  // ── Services externes (M10-04, §9.2 Q6) ───────────────────────────────────
+
+  /// Météo (Open-Meteo). Désactivée ou injoignable → la tuile est **masquée**,
+  /// jamais d'attente bloquante (offline-first, ADR-08).
+  weatherEnabled Boolean @default(false)
+
+  /// Coordonnées de l'instance en **micro-degrés** entiers (degré × 1 000 000).
+  /// Entier et non flottant, comme `tvaRatePpm` ou `carbonationToleranceMbar` :
+  /// un réglage ne doit pas dériver à la sérialisation. Précision ≈ 0,1 m,
+  /// très au-delà du besoin météo. Bornes **posées en base** par contrainte
+  /// `CHECK` (latitude ±90 000 000, longitude ±180 000 000) : une coordonnée
+  /// hors domaine est une donnée fausse, pas une préférence.
+  weatherLatitudeMicroDeg  Int?
+  weatherLongitudeMicroDeg Int?
+
+  // ── Templates (M10-04, §9.2 Q11) ──────────────────────────────────────────
+
+  /// Gabarit appliqué par défaut aux **nouveaux** écrans d'affichage. Réutilise
+  /// l'enum `DisplayTemplate` existant (M7-02) : la demande est de l'injection
+  /// de marque, **pas** une nouvelle famille de gabarits — aucun enum créé.
+  /// Les écrans déjà configurés gardent le leur.
+  defaultDisplayTemplate DisplayTemplate @default(CARDS)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -335,6 +382,36 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // ── Bascule d'utilisateur par PIN (M10-04, ADR-13) ────────────────────────
+
+  /// PIN de bascule sur poste partagé — **Argon2id**, mêmes paramètres que
+  /// `passwordHash`, jamais le clair. `null` = **pas de PIN**, et c'est un état
+  /// de premier ordre : le compte n'apparaît alors pas au sélecteur et se
+  /// connecte par mot de passe. Jamais de chaîne vide pour dire « pas de PIN ».
+  ///
+  /// La **longueur** (4 chiffres, 6 pour `admin`) n'est **pas** stockée : elle
+  /// se vérifie à la pose, côté service. Un hash Argon2id ne révèle de toute
+  /// façon pas la longueur du secret — d'où `pinRenewalRequired` ci-dessous.
+  pinHash      String?
+  pinUpdatedAt DateTime?
+
+  /// Renouvellement imposé avant tout accès (ADR-13 §5). Posé quand le compte
+  /// **reçoit le rôle `admin`** en portant un PIN à 4 chiffres : le PIN court
+  /// est accepté une **dernière** fois pour s'authentifier, puis un écran
+  /// bloquant exige un PIN à 6 chiffres avant que la session ne s'ouvre.
+  /// Ce booléen est nécessaire précisément parce que le hash ne dit pas la
+  /// longueur : sans lui, la règle serait invérifiable — et stocker la longueur
+  /// reviendrait à stocker une information sur le secret.
+  pinRenewalRequired Boolean @default(false)
+
+  /// État de verrouillage du PIN (ADR-13 §3). **Colonnes d'état uniquement** :
+  /// le seuil (5), la fenêtre (15 min), les paliers (5 → 30 min) et la remise à
+  /// zéro (60 min) sont des **paramètres de politique**, ils vivent dans le
+  /// code du service — jamais en base.
+  pinFailedAttempts Int       @default(0)
+  pinFirstFailedAt  DateTime?
+  pinLockedUntil    DateTime?
+
   /// Lien optionnel vers le membre correspondant (compte ↔ personne).
   memberId String? @unique
   member   Member? @relation(fields: [memberId], references: [id], onDelete: SetNull)
@@ -351,6 +428,15 @@ model User {
   packagings     BatchPackaging[]
 }
 
+/// Méthode par laquelle une session a été ouverte (M10-04, ADR-13 §6). On
+/// introduit une preuve d'identité volontairement plus faible que le mot de
+/// passe : il faut pouvoir la **distinguer après coup**, sinon une action tracée
+/// ne dit plus avec quel niveau de preuve son auteur a été authentifié.
+enum AuthMethod {
+  PASSWORD
+  PIN
+}
+
 /// Session serveur persistée (ADR-10 : cookie + session en DB). Le token brut
 /// n'est jamais stocké — seul son hash SHA-256 l'est ; le cookie porte le token.
 model Session {
@@ -360,6 +446,16 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  /// Méthode d'ouverture (ADR-13 §6), reportée au journal d'audit. Défaut
+  /// `PASSWORD` : les sessions **existantes** au moment de la migration ont
+  /// toutes été ouvertes par mot de passe, le défaut est donc exact et non un
+  /// simple remplissage.
+  ///
+  /// La **durée** de la session dépend de cette méthode — 12 h par PIN contre
+  /// 7 jours par mot de passe (ADR-13 §4) — mais elle reste portée par
+  /// `expiresAt` : c'est le service qui calcule, la base qui constate.
+  authMethod AuthMethod @default(PASSWORD)
 
   @@index([userId])
 }
