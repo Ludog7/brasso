@@ -40,7 +40,12 @@ Options à instruire, chacune avec son coût :
 
 **Conséquence sur le vocabulaire du milestone** : là où §9.3/§9.4 et l'epic parlent d'« **élargissement de `parametres`** », lire désormais « **scission de `parametres`, création de `options`** ». La mention de renvoi ajoutée en §3.5 doit le dire explicitement, sinon la spec et l'ADR se contrediront à la lecture.
 
-**Sous-question à trancher dans la foulée** : l'écran de **connexion** doit-il afficher le nom et le logo de la brasserie ? Si oui, une part de l'apparence est lisible **avant authentification** et doit être isolée du reste des options (nom, logo, couleur — rien d'autre). Le contexte est une appliance **LAN-only** (M14), donc l'exposition est faible, mais elle doit être décidée et bornée, pas héritée par accident.
+> **Tranché par Ludo le 2026-07-20 — l'écran de connexion affiche le nom et le logo.**
+> Une part de l'apparence est donc lisible **avant authentification**. Contexte : appliance **LAN-only** (M14), exposition faible et assumée.
+>
+> **Contrepartie non négociable : le sous-ensemble public est borné à trois champs — nom, logo, couleur de marque. Rien d'autre.** L'ADR doit nommer ces champs un par un, pas décrire une catégorie : « l'apparence » est une porte qui s'élargit toute seule au fil des milestones. Tout futur champ d'`options` est **privé par défaut** ; l'ajouter au sous-ensemble public exige un amendement d'ADR.
+>
+> À spécifier également : cette lecture publique est **read-only**, non authentifiée, et ne doit divulguer **ni** l'existence de comptes, **ni** le nom de l'association si celui-ci n'est pas encore configuré (pas de fuite de l'état d'installation).
 
 **B. Cellules de `taches` et `agenda`.**
 Proposer et justifier chaque cellule ; toute cellule vide est un **refus explicite**, pas un oubli. Point de départ à discuter :
@@ -64,7 +69,8 @@ Ce que l'ADR impose à M10-05 (déclarations `(ressource, action)` des routes `s
 - [ ] La **scission `parametres` / `options`** est actée (arbitrage Ludo du 2026-07-20), **les trois options restant écrites** avec le motif de rejet de (a) et (c)
 - [ ] Les cellules de la nouvelle ressource `options` sont fixées pour les 4 rôles (read : 4 rôles ; update : admin) et celles de `parametres` explicitement **laissées inchangées**
 - [ ] La mention de renvoi en §3.5 précise que « élargissement de `parametres` » (§9.3/§9.4, epic) se lit désormais « scission + ressource `options` »
-- [ ] Le sort de l'écran de connexion (apparence avant authentification) est tranché et **borné** aux seuls champs nommés
+- [ ] Le sous-ensemble **public** (avant authentification) est écrit **champ par champ** — nom, logo, couleur de marque — et la règle « tout nouveau champ d'`options` est privé par défaut » est posée
+- [ ] La lecture publique est spécifiée read-only et **non divulgante** (ni existence de comptes, ni état d'installation)
 - [ ] Les cellules de `taches` et `agenda` sont fixées **pour les 4 rôles**, chaque cellule vide justifiée comme un refus
 - [ ] La position « matrice non éditable » est actée avec ses trois motifs, et le deny-by-default réaffirmé
 - [ ] `docs/adr/README.md` : index à jour (ADR-12 → **Acceptée**)

@@ -29,12 +29,19 @@ Il faut nommer le compromis sans le maquiller : **on abaisse volontairement le n
 | **(b)** La bascule par PIN **exclut `admin`** : l'admin se ré-authentifie par mot de passe | Le privilège élevé garde une preuve forte | Une gêne réelle pour l'admin — mais il n'est pas le rôle du poste partagé |
 | **(c)** PIN pour tous, mais les **actions sensibles** re-demandent le mot de passe | Grain fin | Il faut définir « sensible » — surface d'erreur large, à maintenir dans le temps |
 
-**Recommandation à instruire : (b)**, éventuellement complétée de (c) pour les actions RGPD. Motif : le poste partagé est un poste d'**atelier** ; y rendre l'administration accessible en 4 chiffres apporte peu et coûte cher.
+> **Tranché par Ludo le 2026-07-20 — option (a) amendée : tous les rôles basculent par PIN, avec une longueur différenciée.**
+> **PIN à 4 chiffres pour tous les rôles ; PIN à 6 chiffres pour `admin`.** Motif retenu : le poste est **ouvert mais l'environnement est contrôlé** (local associatif, appliance LAN-only, pas de public de passage). La recommandation initiale — exclure `admin` de la bascule — est **écartée** : elle coûtait une gêne quotidienne pour un gain que le contexte ne justifie pas.
+>
+> L'ADR conserve les trois options écrites et motive le rejet de (b) et (c).
+
+**Ce que l'ADR doit dire honnêtement sur cette différenciation.** Passer de 4 à 6 chiffres fait passer l'espace de 10 000 à 1 000 000 de combinaisons — un facteur 100 réel. Mais contre une attaque en ligne, ce n'est **pas** ce qui protège : avec un rate-limit correct, 10 000 combinaisons sont déjà hors de portée. Les deux chiffres supplémentaires servent contre un tout autre risque — l'**observation par-dessus l'épaule** et la mémorisation d'une saisie vue une fois, sensiblement plus difficile à 6 chiffres.
+
+Conséquence à écrire noir sur blanc : sur ce modèle de menace, **le rate-limit et l'interdiction des PIN triviaux comptent davantage que la longueur**. Un PIN admin de 6 chiffres valant `123456` est plus faible qu'un PIN de 4 chiffres tiré au hasard. La règle d'interdiction des suites triviales (section B) n'est donc pas un raffinement optionnel : c'est la mesure principale, et elle doit s'appliquer **aux deux longueurs**.
 
 **B. Paramètres à chiffrer** — chacun doit sortir de l'ADR avec une **valeur**, pas une fourchette :
 
-- **Longueur du PIN** : 4, 5 ou 6 chiffres ? Longueur fixe ou plancher ? Chiffres seuls ou alphanumérique ?
-- **PIN interdits** : refuse-t-on les suites triviales (`0000`, `1234`, `1111`, date de naissance) ? Si oui, la liste ou la règle.
+- **Longueur du PIN** : **tranchée** — 4 chiffres, et **6 pour `admin`**. Reste à spécifier : longueur **exacte** ou plancher ? chiffres seuls (pavé numérique tactile) ? et ce qui se passe quand un compte **se voit attribuer le rôle `admin`** alors qu'il porte déjà un PIN à 4 chiffres — renouvellement forcé à la prochaine bascule, ou PIN invalidé sur-le-champ ?
+- **PIN interdits** : **mesure principale** au vu du modèle de menace ci-dessus, à appliquer aux **deux** longueurs. Écrire la règle (suites croissantes/décroissantes, chiffres répétés, années plausibles) plutôt qu'une liste figée, et dire si elle est vérifiée côté serveur — elle doit l'être, un contrôle purement client se contourne.
 - **Seuil de blocage `N`** et **fenêtre** : N échecs en combien de temps ?
 - **Effet du blocage** : temporisation croissante ou blocage ferme ? Durée ? Et surtout — **qui débloque** : expiration automatique, ou intervention admin ? (Un blocage ferme sans admin joignable un samedi de brassage immobilise le poste : le nommer.)
 - **Portée du blocage** : par **utilisateur**, par **poste**, ou les deux ? Un blocage par utilisateur seul permet de balayer les comptes un par un ; un blocage par poste seul permet de bloquer autrui par déni de service. Trancher en connaissance de cause.
@@ -53,7 +60,9 @@ La conséquence négative, nommée : à privilège égal, une session ouverte pa
 
 ## Definition of Done
 - [ ] `docs/adr/ADR-13-bascule-utilisateur-pin.md` créé au gabarit du README, statut **Acceptée**, date, n° d'issue, champ « Amende » = **ADR-10**
-- [ ] La question « PIN et compte `admin` » est tranchée, les trois options écrites, le rejet motivé
+- [ ] L'arbitrage Ludo du 2026-07-20 est consigné (**4 chiffres pour tous, 6 pour `admin`**), les trois options restant écrites avec le motif de rejet de (b) et (c)
+- [ ] Le modèle de menace est écrit **honnêtement** : les 2 chiffres de plus servent contre l'observation, pas contre le brute-force en ligne — et l'interdiction des PIN triviaux est désignée comme la **mesure principale**, applicable aux deux longueurs
+- [ ] Le cas « un compte reçoit le rôle `admin` en portant un PIN à 4 chiffres » est tranché
 - [ ] **Chacun** des paramètres de la section B sort avec une **valeur chiffrée** (aucune fourchette, aucun « à définir »)
 - [ ] La portée du blocage (utilisateur / poste) est tranchée en nommant le risque écarté
 - [ ] Le mode de **déblocage** est écrit, y compris le cas « admin non joignable »
