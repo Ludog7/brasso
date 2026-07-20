@@ -64,9 +64,21 @@ pnpm test:e2e                                        # cf. conditions ci-dessous
 
 ### Pièges qui ont déjà cassé la CI
 
-- **CRLF / Windows** : `core.autocrlf=true` fait échouer `format:check` en local.
-  Passe Prettier sur **TOUS** les fichiers touchés — API _et_ web _et_ core. Une
-  CI a déjà cassé pour un seul fichier API oublié.
+- **CRLF / Windows — vérifie en deux temps.** `core.autocrlf=true` fait échouer
+  `format:check` **en local** sur des fichiers que tu n'as jamais touchés (le
+  repo est en LF, la CI est verte). D'où l'ordre imposé :
+
+  1. `npx prettier --check "<glob de TES fichiers>"` — seul verdict qui engage
+     ton diff. Passe Prettier sur **TOUS** les fichiers touchés, API _et_ web
+     _et_ core : une CI a déjà cassé pour un seul fichier API oublié.
+  2. `pnpm format:check` (repo entier) — pour coller à la CI.
+
+  Si l'étape 2 échoue **uniquement** sur des fichiers hors de ton diff, ce n'est
+  pas un échec du ticket : rapporte-le comme piège CRLF connu, étape ✅ avec la
+  mention, et **n'y touche pas**. Surtout, ne lance **jamais** `pnpm format` sur
+  le repo entier pour « réparer » : tu réécrirais des centaines de fichiers
+  étrangers au ticket et rendrais le diff irrelisable en revue.
+
 - **Couverture `core` ≥ 90 %** (lines/branches/functions/statements), imposée par
   `packages/core/vitest.config.ts`. Si le diff touche `packages/core`, lance
   `pnpm --filter @brasso/core test:coverage` et **rapporte les quatre chiffres**.
@@ -78,10 +90,18 @@ pnpm test:e2e                                        # cf. conditions ci-dessous
 
 ### E2E
 
-`pnpm test:e2e` fait partie du check `ci` **bloquant**. Tu le lances dès que le
-diff touche un comportement d'exécution (`apps/web`, `apps/api`,
-`packages/core`). Tu ne le sautes que si l'agent principal te l'a dit
-explicitement — et tu l'écris alors en toutes lettres dans le rapport.
+`pnpm test:e2e` fait partie du check `ci` **bloquant**, et il coûte plusieurs
+minutes. Cadre-le sur le diff plutôt que de le lancer par réflexe :
+
+- **Le diff touche du code de production** (`apps/**/src`, `packages/**/src`) :
+  tu le lances, sans exception. C'est là que se logent les régressions de
+  câblage qu'aucun test unitaire ne voit.
+- **Diff test-only** (uniquement fichiers de test, fixtures, ou `docs/`) : tu le
+  **sautes** et tu écris `⏭️ non lancé — diff test-only` dans le rapport.
+  Rejouer Playwright sur un diff qui n'ajoute qu'un test unitaire ne prouve
+  rien : ça ne fait que retarder le verdict.
+- Une consigne explicite de l'agent principal prime dans les deux sens — et tu
+  l'écris alors en toutes lettres dans le rapport.
 
 ```powershell
 $env:E2E_DATABASE_URL="postgresql://brasso:<mdp>@localhost:5433/brasso_e2e"
