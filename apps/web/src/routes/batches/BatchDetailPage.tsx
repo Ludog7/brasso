@@ -114,10 +114,20 @@ export function BatchDetailPage() {
           </Button>
         ) : null}
         {/* Conditionnement (M9-13) : proposé aux mêmes statuts que le serveur
-            accepte (M9-08), pour ne pas ouvrir un écran qui refusera la saisie. */}
+            accepte (M9-08), pour ne pas ouvrir un écran qui refusera la saisie.
+
+            `TERMINE` y mène aussi, sous un autre libellé (#273) : enregistrer le
+            conditionnement fait précisément passer le brassin dans cet état, et
+            c'est **après** qu'on relève la pression d'un fût. Sans ce lien,
+            l'écran de mise en condition devenait inatteignable au moment même où
+            il sert. */}
         {data.status === "EN_FERMENTATION" || data.status === "EN_CONDITIONNEMENT" ? (
           <Button asChild className="ml-auto">
             <Link to={`/batches/${data.id}/packaging`}>Conditionner</Link>
+          </Button>
+        ) : data.status === "TERMINE" ? (
+          <Button asChild variant="outline" className="ml-auto">
+            <Link to={`/batches/${data.id}/packaging`}>Mise en condition</Link>
           </Button>
         ) : null}
       </header>
