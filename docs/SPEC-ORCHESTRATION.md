@@ -28,6 +28,8 @@ Chaque décision ci-dessous est **figée**. Toute remise en cause passe par un t
 | ADR-10 | **Auth session cookie + RBAC maison** | Selfhosted, pas de dépendance SaaS ; 4 rôles suffisent | Pas de Keycloak/Auth0 en V1. Argon2id pour les mots de passe. |
 | ADR-11 | **Indicateurs pH/sécurité = aide à la décision, jamais validation** | Risque juridique/sanitaire d'un badge "conforme" | Wording UI imposé : "indicateur", jamais "conforme/sûr". Disclaimer permanent sur les écrans concernés. Tickets `regulatory` dédiés. |
 
+> **ADR-10 est amendé par [ADR-13](adr/ADR-13-bascule-utilisateur-pin.md) (Acceptée, 2026-07-20).** La ligne ci-dessus reste en vigueur — session cookie, Argon2id, RBAC maison. ADR-13 y **ajoute** une seconde voie d'ouverture de session sur poste partagé : la **bascule d'utilisateur par PIN** (4 chiffres, **6 pour `admin`**), volontairement plus faible qu'un mot de passe et bornée en conséquence — session **12 h** contre 7 jours, verrouillage après 10 min d'inactivité, temporisation croissante à expiration automatique après 5 échecs, PIN triviaux refusés côté serveur, méthode d'authentification (`PASSWORD` / `PIN`) tracée dans le journal d'audit. La bascule n'accorde **aucun droit supplémentaire** : la matrice §3.5 s'applique inchangée.
+
 ### 0.1 Points réglementaires à valider HORS développement
 
 Deux validations externes sont **prérequises avant la mise en production** (pas avant le début du dev) :
