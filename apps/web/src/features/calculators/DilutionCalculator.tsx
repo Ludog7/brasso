@@ -78,7 +78,7 @@ export function DilutionCalculator() {
             <ResultRow label="Volume final" value={fmt1(result.finalVolumeL)} hint="L" />
           </>
         ) : rangeMessage ? (
-          <p role="alert" className="text-sm text-amber-600 dark:text-amber-400">
+          <p role="alert" className="text-sm text-warning">
             {rangeMessage}
           </p>
         ) : (

@@ -29,6 +29,23 @@
   --destructive: oklch(0.58 0.22 25);
   --destructive-foreground: oklch(0.99 0 0);
 
+  /*
+   * Jetons sémantiques d'avertissement et de succès (M10-10). Ils remplacent les
+   * nuances brutes de la palette Tailwind (`amber-200`, `emerald-400`…) qui
+   * étaient accordées au seul fond sombre et devenaient illisibles en clair.
+   *
+   * Un jeton **unique** par sémantique : les usages (texte, fond teinté, filet)
+   * se dérivent par modulation d'opacité — `text-warning`, `bg-warning/10`,
+   * `border-warning/40`. Un jeton par usage serait une prolifération inutile.
+   *
+   * Luminosité calée sur le **pire fond réellement utilisé** — le texte du jeton
+   * posé sur un aplat du même jeton à 20 % (badge d'anomalies du hub). À
+   * L=0.55 ce cas tombait à 4,42:1, sous le seuil AA ; à L=0.50 il passe à
+   * 4,61:1. Mesurer sur le fond uni aurait laissé filer le défaut.
+   */
+  --warning: oklch(0.5 0.14 60);
+  --success: oklch(0.47 0.12 165);
+
   /* Couleurs des courbes de suivi (M3-10) — contrastées sur `--card`. */
   --chart-gravity: oklch(0.52 0.16 150);
   --chart-temperature: oklch(0.58 0.17 45);
@@ -50,6 +67,11 @@
   --destructive: oklch(0.64 0.2 25);
   --destructive-foreground: oklch(0.98 0.003 260);
 
+  /* Contreparties sombres — calées sur le rendu actuel (amber-200/300,
+     emerald-300/400) pour que le sombre reste visuellement équivalent. */
+  --warning: oklch(0.88 0.12 85);
+  --success: oklch(0.84 0.13 165);
+
   --chart-gravity: oklch(0.72 0.16 150);
   --chart-temperature: oklch(0.75 0.15 55);
 }
@@ -69,6 +91,8 @@
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
   --color-chart-gravity: var(--chart-gravity);
   --color-chart-temperature: var(--chart-temperature);
 

@@ -57,7 +57,7 @@ export function PhaseProgress({ plan, cursor }: { plan: DayPlan; cursor: number 
               ].join(" ")}
             >
               {done ? (
-                <Check className="size-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                <Check className="size-3.5 shrink-0 text-success" aria-hidden="true" />
               ) : (
                 <span
                   aria-hidden="true"

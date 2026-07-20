@@ -258,7 +258,7 @@ export function StepRunner({
 function FinishScreen({ batchId }: { batchId: string }) {
   return (
     <div className="flex flex-col items-center gap-6 text-center">
-      <CheckCircle2 className="size-16 text-emerald-400" aria-hidden="true" />
+      <CheckCircle2 className="size-16 text-success" aria-hidden="true" />
       <div className="flex flex-col items-center gap-2">
         <h2 className="text-3xl font-semibold">Brassin terminé</h2>
         <p className="max-w-sm text-muted-foreground">

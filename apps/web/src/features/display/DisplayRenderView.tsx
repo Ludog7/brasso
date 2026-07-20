@@ -96,7 +96,7 @@ export function DisplayRenderView({
         {isStale ? (
           <span
             role="status"
-            className="inline-flex items-center gap-2 text-base font-medium text-amber-300"
+            className="inline-flex items-center gap-2 text-base font-medium text-warning"
           >
             <WifiOff className="size-5" aria-hidden="true" />
             Hors ligne — resynchronisation…

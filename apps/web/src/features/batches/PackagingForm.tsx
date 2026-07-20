@@ -571,7 +571,7 @@ export function PackagingSummary({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <CheckCircle2 className="size-6 text-emerald-400" aria-hidden="true" />
+          <CheckCircle2 className="size-6 text-success" aria-hidden="true" />
           Conditionnement enregistré
         </CardTitle>
       </CardHeader>
@@ -632,7 +632,7 @@ function Warning({ children }: { children: React.ReactNode }) {
   return (
     <p
       role="alert"
-      className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200"
+      className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning"
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <span>{children}</span>

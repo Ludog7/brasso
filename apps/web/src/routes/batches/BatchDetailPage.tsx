@@ -136,7 +136,7 @@ export function BatchDetailPage() {
         {planNotice?.stockWarnings && planNotice.stockWarnings.length > 0 ? (
           <div
             role="alert"
-            className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+            className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
           >
             <p className="font-medium">
               Stock insuffisant pour certains articles (indicatif, non bloquant) :

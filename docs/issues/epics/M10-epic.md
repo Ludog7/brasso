@@ -33,8 +33,9 @@ La brasserie configure son **nom, son logo et sa couleur de marque** dans les Op
 | **M10-07** | `web` | Fondations design system : jetons de thème (**en clair**, le défaut ayant déjà été basculé en dur), primitives d'**états vides / chargement / erreur** réutilisables. Socle du fil rouge UX (§4). ⚠️ La bascule clair/sombre et la dérivation de marque **ne sont plus ici** → M10-11. |
 | **M10-08** | `web` | Volet « Options générales » : sous-volets Apparence, Accès (**restitution en lecture** de la matrice, rôle `caisse` affiché « **Trésorier / Caisse** »), Services, Templates. ⚠️ La **bascule clair/sombre** n'est plus ici → M10-11. |
 | **M10-09** | `web` | Bandeau : logo, nom de la brasserie, **badge de l'utilisateur actif**, bascule d'utilisateur en 2 clics + saisie du PIN. |
-| **M10-10** | `web` | Application homogène du thème à l'existant + passe responsive et états vides sur les écrans déjà livrés. |
+| **M10-10** | `web` | **Avancé en début de milestone** : lisibilité de l'existant en thème clair — jetons sémantiques `warning`/`success`, 68 utilitaires bruts accordés au fond sombre. Sans lui, tout le travail d'interface qui suit serait jugé sur une base tachée. |
 | **M10-11** | `web` | **Clôture du milestone** : bascule clair/sombre configurable et persistée + dérivation du thème depuis la couleur de marque (contraste AA dans les deux thèmes). Reprend ce que M10-07/M10-08 portaient avant l'arbitrage du 2026-07-20. |
+| **M10-12** | `web` | Passe **responsive** et **états vides** sur les écrans déjà livrés — l'autre moitié du M10-10 d'origine, qui consomme les primitives de M10-07 et ne peut donc pas être avancée avec lui. |
 
 ## Dépendances
 Bloqué par : validation de la démo M9. **M10-01 à M10-03 (ADR) bloquent tous les autres tickets du milestone** — aucune implémentation ne démarre avant que les ADR correspondants soient tranchés et écrits dans `docs/adr/`.
