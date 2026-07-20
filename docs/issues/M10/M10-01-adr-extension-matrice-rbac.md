@@ -2,7 +2,7 @@
 labels: adr, docs, P0
 milestone: M10 — Socle transverse : options, apparence & identité
 ---
-# M10-01 — adr : ADR-12 « extension de la matrice RBAC » (ressources `taches`, `agenda`, élargissement de `parametres`)
+# M10-01 — adr : ADR-12 « extension de la matrice RBAC » (ressources `taches`, `agenda`, scission de `parametres`)
 
 ## Contexte
 La matrice §3.5 est **figée** (ADR-10) et `apps/api/src/rbac/matrix.ts:8` porte l'invariant en toutes lettres : « toute évolution de la matrice = ticket `type:adr` ». Trois besoins du dev step 2 la font bouger :

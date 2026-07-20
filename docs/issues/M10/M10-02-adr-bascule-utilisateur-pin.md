@@ -1,5 +1,5 @@
 ---
-labels: adr, docs, security, P0
+labels: adr, docs, api, P0
 milestone: M10 — Socle transverse : options, apparence & identité
 ---
 # M10-02 — adr : ADR-13 « bascule d'utilisateur par PIN sur poste partagé » (amende ADR-10)
