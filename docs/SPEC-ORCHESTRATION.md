@@ -199,6 +199,14 @@ AuditLog        : accès aux données personnelles + actions sensibles (append-o
 
 Toute route API déclare son couple (ressource, action) ; le plugin RBAC refuse par défaut (deny-by-default).
 
+> **Étendue par [ADR-12](adr/ADR-12-extension-matrice-rbac.md) (Acceptée, 2026-07-20).** Le tableau ci-dessus reste la V1 figée ; l'ADR **ajoute** des lignes sans en réécrire aucune. Trois points :
+>
+> - **`parametres` est scindé.** Là où §9.3, §9.4 et l'epic #245 parlent d'« élargissement de `parametres` », lire désormais « **scission de `parametres`, création de la ressource `options`** ». `parametres` (comptes, réglages sensibles) garde ses cellules **inchangées** ; la nouvelle ressource `options` vaut `read` pour les **4 rôles**, écriture pour le **seul** `admin`. Motif : ouvrir `parametres:read` aurait ouvert la liste des utilisateurs en lecture, par effet de bord.
+> - **`taches` et `agenda`** (M13) : `CRUD / CRUD / R / —`. La cellule vide de `rgpd` est un **refus explicite** — son périmètre est la donnée personnelle, pas la vie de l'atelier.
+> - Une part de l'apparence (**nom, logo, couleur de marque** — ces trois champs, en liste blanche) est lisible **avant authentification** sur l'écran de connexion, donc hors matrice. Tout autre champ d'`options` est **privé par défaut**.
+>
+> La matrice reste **non éditable** (ni en base, ni par l'interface) : l'ADR en fige les trois motifs.
+
 ### 3.6 Hub caisse (ADR-09)
 
 ```
