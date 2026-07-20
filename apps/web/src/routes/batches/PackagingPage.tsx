@@ -11,7 +11,8 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { useBatch, useBatchPackaging } from "@/features/batches/hooks";
+import { ConditioningPanel } from "@/features/batches/ConditioningPanel";
+import { useBatch } from "@/features/batches/hooks";
 import { STATUS_LABELS, STATUS_TONE } from "@/features/batches/labels";
 import { PackagingForm, PackagingSummary } from "@/features/batches/PackagingForm";
 import type { BatchStatus, PackagingRecordResult } from "@/lib/api";
@@ -25,7 +26,6 @@ const PACKAGEABLE: BatchStatus[] = ["EN_FERMENTATION", "EN_CONDITIONNEMENT"];
 export function PackagingPage() {
   const { id = "" } = useParams();
   const batch = useBatch(id);
-  const packaging = useBatchPackaging(id);
   /**
    * Conditionnement qui vient d'être écrit. Détenu ici parce que l'écriture fait
    * passer le brassin en `TERMINE` : la garde d'état retire alors le formulaire,
@@ -73,26 +73,11 @@ export function PackagingPage() {
       </header>
 
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-6">
-        {/* Conditionnements antérieurs : un conditionnement peut s'étaler sur
-            plusieurs séances (M9-08), et l'ignorer ferait ressaisir des lignes
-            déjà enregistrées. */}
-        {(packaging.data?.length ?? 0) > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Déjà conditionné</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="grid gap-1.5 text-sm">
-                {packaging.data?.map((line) => (
-                  <li key={line.id} className="flex flex-wrap justify-between gap-x-4">
-                    <span className="text-muted-foreground">{line.containerVolumeL} L</span>
-                    <span className="font-medium">× {line.quantity}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ) : null}
+        {/* Conditionnements antérieurs **et** mise en condition (#273) : un
+            conditionnement peut s'étaler sur plusieurs séances (M9-08), et le
+            relevé de pression d'un fût se fait des jours après la mise en fût —
+            sur cet écran, rouvert à froid. */}
+        <ConditioningPanel batchId={data.id} />
 
         {result !== null ? (
           <PackagingSummary result={result} batchId={data.id} />
@@ -104,9 +89,14 @@ export function PackagingPage() {
               <CardTitle className="text-lg">Conditionnement indisponible</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              {/* Un brassin `TERMINE` arrive ici **normalement** : c'est
+                  l'enregistrement du conditionnement qui l'y a mené (M9-08), et
+                  on revient sur cet écran pour relever un fût. Le dire, plutôt
+                  que de laisser croire à une erreur de navigation. */}
               <p role="alert" className="text-sm text-muted-foreground">
-                Ce brassin est « {STATUS_LABELS[data.status]} » : le conditionnement se saisit sur
-                un brassin en fermentation ou en conditionnement.
+                {data.status === "TERMINE"
+                  ? "Le conditionnement de ce brassin est enregistré : aucun contenant supplémentaire ne peut être saisi. La mise en condition ci-dessus reste ouverte — un relevé de pression peut encore y être fait."
+                  : `Ce brassin est « ${STATUS_LABELS[data.status]} » : le conditionnement se saisit sur un brassin en fermentation ou en conditionnement.`}
               </p>
               <div>
                 <Button asChild variant="outline">

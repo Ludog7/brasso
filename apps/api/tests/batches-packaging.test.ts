@@ -792,6 +792,46 @@ describe("mise en condition avant vente (M9-15)", () => {
     expect(line.availableForSaleDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it("expose le motif d'attente en LECTURE, pas seulement en réponse d'un relevé", async () => {
+    // Un fût se relève des jours après la mise en fût, sur un écran rouvert à
+    // froid (#273) : sans le motif dans la liste, l'écran ne saurait pas dire
+    // *pourquoi* la ligne n'a pas de date, et l'attente ressemblerait à un bug.
+    await record({ lines: [KEGS_FORCED, BOTTLES_REFERMENTED] });
+    const res = await inject("GET", "/api/batches/batch_1/packaging", {
+      cookie: cookieFor("brasseur"),
+    });
+    const lines = res.json().packaging;
+
+    const keg = lines.find(
+      (l: { conditioningMethod: string }) => l.conditioningMethod === "FORCED_CARBONATION",
+    );
+    expect(keg.availableForSaleDate).toBeNull();
+    expect(keg.pendingReason).toMatch(/relevé de pression/i);
+
+    // Symétrie : une date acquise ne laisse aucun motif d'attente derrière elle.
+    const bottles = lines.find(
+      (l: { conditioningMethod: string }) => l.conditioningMethod === "REFERMENTATION",
+    );
+    expect(bottles.availableForSaleDate).not.toBeNull();
+    expect(bottles.pendingReason).toBeNull();
+  });
+
+  it("un relevé atteignant la cible efface le motif d'attente de la ligne", async () => {
+    await record({ lines: [KEGS_FORCED] });
+    const line = await lineOf("FORCED_CARBONATION");
+    const target = await inject("POST", "/api/batches/batch_1/packaging/pressure", {
+      cookie: cookieFor("brasseur"),
+      payload: { co2TargetVolumes: 2.4, tempC: 4 },
+    });
+    await readPressure(line.id, { pressureBar: target.json().target.targetBar, tempC: 4 });
+
+    const res = await inject("GET", "/api/batches/batch_1/packaging", {
+      cookie: cookieFor("brasseur"),
+    });
+    expect(res.json().packaging[0].pendingReason).toBeNull();
+    expect(res.json().packaging[0].availableForSaleDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it("les délais viennent des Settings, pas de constantes", async () => {
     packaging.settings = { ...packaging.settings, refermentationDays: 30 };
     await record({ lines: [BOTTLES_REFERMENTED] });

@@ -7,6 +7,8 @@ import {
   type BatchMilestoneKind,
   type BatchOverviewFilters,
   type BatchStatus,
+  type CarbonationReadingInput,
+  type CarbonationTargetInput,
   type MeasureCreateInput,
   type PackagingRecordInput,
 } from "@/lib/api";
@@ -120,6 +122,39 @@ export function useRecordPackaging(batchId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: batchKeys.all });
       void qc.invalidateQueries({ queryKey: stockKeys.all });
+    },
+  });
+}
+
+/**
+ * Pression à régler au détendeur pour un CO₂ visé à une température (M9-15).
+ *
+ * Une **mutation** bien qu'elle n'écrive rien : c'est une aide qu'on demande à
+ * un instant choisi, avec la température qu'on vient de lire au fût. En faire
+ * une `useQuery` la relancerait à chaque frappe dans le champ de température et
+ * ferait danser la cible sous les yeux de l'opérateur.
+ */
+export function useCarbonationTarget(batchId: string) {
+  return useMutation({
+    mutationFn: (input: CarbonationTargetInput) => batchesApi.carbonationTarget(batchId, input),
+  });
+}
+
+/**
+ * Enregistre un relevé de pression sur une ligne de fûts (M9-15).
+ *
+ * Invalide les conditionnements du brassin : un relevé atteignant la cible pose
+ * `availableForSaleAt`, et la liste des lignes doit annoncer la date sans
+ * qu'on recharge la page. La racine `batches` suit, car l'échéance remonte
+ * jusqu'à la vue « Brassins » (M9-09).
+ */
+export function useRecordCarbonationReading(batchId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lineId, input }: { lineId: string; input: CarbonationReadingInput }) =>
+      batchesApi.recordCarbonationReading(batchId, lineId, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: batchKeys.all });
     },
   });
 }

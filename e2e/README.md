@@ -16,6 +16,11 @@ reset`, rejoue le seed de base) puis amorce les données de parcours
   recette publiée → batch → Jour J intégral (filtration, assainissement du
   circuit, whirlpool, refroidissement) → durées prévisionnelles et jalons datés
   → vue Brassins → conditionnement → stock de produits finis affichable au bar.
+- `tests/carbonatation.spec.ts` → **mise en condition d'un fût** (#273) :
+  conditionnement en carbonatation forcée → aide au réglage du détendeur →
+  relevé de pression atteignant la cible → date de mise en vente, persistée et
+  atteignable depuis un brassin `TERMINE`. Court-circuite le Jour J (déjà couvert
+  ci-dessus) par transitions d'API : ~3 s.
 
 ### Budget de temps
 

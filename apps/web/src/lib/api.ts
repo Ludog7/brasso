@@ -855,8 +855,52 @@ export interface PackagingLine {
   carbonationValidatedAt: string | null;
   availableForSaleAt: string | null;
   availableForSaleDate: string | null;
+  /** Ce qui manque pour qu'une date existe, à afficher tel quel ; `null` si elle existe. */
+  pendingReason: string | null;
   packagedAt: string;
   note: string | null;
+}
+
+/**
+ * Aide au réglage du détendeur (M9-15) : pression à appliquer pour un CO₂ visé à
+ * une température. **N'écrit rien** — c'est ce qu'on lit *avant* de toucher au
+ * détendeur. `POST` malgré la lecture : le corps porte des flottants signés que
+ * l'on ne veut pas voir traîner dans une URL de journal.
+ */
+export interface CarbonationTargetInput {
+  co2TargetVolumes: number;
+  tempC: number;
+  altitudeFt?: number;
+}
+
+export interface CarbonationTarget {
+  /** Pression à régler (bar) à la température donnée. */
+  targetBar: number;
+  /** Écart admis de part et d'autre (bar), paramètre d'instance. */
+  toleranceBar: number;
+}
+
+/** Relevé de pression au fût (M9-15). */
+export interface CarbonationReadingInput {
+  pressureBar: number;
+  tempC: number;
+  altitudeFt?: number;
+}
+
+/**
+ * Verdict d'un relevé (miroir de `CarbonationReadingResult`). ADR-11 :
+ * `onTarget` dit que la mesure **atteint la cible** — un indicateur d'aide à la
+ * décision, jamais une attestation de conformité.
+ */
+export interface CarbonationReadingResult {
+  /** Pression cible (bar) **recalculée à la température relevée**. */
+  targetBar: number;
+  /** Écart signé (bar) : négatif = en deçà de la cible. */
+  deltaBar: number;
+  onTarget: boolean;
+  line: PackagingLine;
+  availableForSaleDate: string | null;
+  pendingReason: string | null;
 }
 
 /** Mouvement de stock généré par un conditionnement. */
@@ -941,6 +985,28 @@ export const batchesApi = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  /** Pression à régler au détendeur pour un CO₂ visé (M9-15) — aide, n'écrit rien. */
+  carbonationTarget: (id: string, input: CarbonationTargetInput): Promise<CarbonationTarget> =>
+    request<{ target: CarbonationTarget }>(`/api/batches/${id}/packaging/pressure`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((r) => r.target),
+
+  /**
+   * Enregistre un relevé de pression sur une ligne en carbonatation forcée
+   * (M9-15). Le relevé est **conservé même s'il n'atteint pas la cible** : c'est
+   * un constat qui permet de réajuster le détendeur, pas un échec à effacer.
+   */
+  recordCarbonationReading: (
+    id: string,
+    lineId: string,
+    input: CarbonationReadingInput,
+  ): Promise<CarbonationReadingResult> =>
+    request<{ reading: CarbonationReadingResult }>(
+      `/api/batches/${id}/packaging/${lineId}/carbonation`,
+      { method: "POST", body: JSON.stringify(input) },
+    ).then((r) => r.reading),
 
   /** Défauts de cycle du brassin : durées, fuseau de l'instance, dry hop (M9-16). */
   cycleDefaults: (id: string): Promise<BatchCycleDefaults> =>

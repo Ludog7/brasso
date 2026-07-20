@@ -23,6 +23,7 @@ import {
 
 import type {
   ConditioningMethod,
+  ConditioningSettings,
   PackagingCorrectionData,
   PackagingLineView,
   PackagingMovementView,
@@ -122,14 +123,37 @@ export interface CarbonationReadingResult extends CarbonationCheck {
 export interface PackagingLineApiView extends PackagingLineView {
   /** Date calendaire de mise en vente (`YYYY-MM-DD`), `null` si non estimée. */
   availableForSaleDate: string | null;
+  /**
+   * Ce qu'il reste à faire pour qu'une date existe, à afficher tel quel ; `null`
+   * quand elle existe.
+   *
+   * Exposé **en lecture** et pas seulement en réponse d'un relevé : un fût se
+   * relève des jours après la mise en fût, sur un écran qu'on ouvre à froid.
+   * Sans ce motif dans la liste, l'écran ne saurait dire *pourquoi* la ligne
+   * n'a pas de date, et l'attente ressemblerait à un bug.
+   */
+  pendingReason: string | null;
 }
 
-const toLineApiView = (line: PackagingLineView, timezone: string): PackagingLineApiView => ({
+const toLineApiView = (
+  line: PackagingLineView,
+  settings: ConditioningSettings,
+): PackagingLineApiView => ({
   ...line,
   availableForSaleDate:
     line.availableForSaleAt === null
       ? null
-      : calendarDateInZone(line.availableForSaleAt.getTime(), timezone),
+      : calendarDateInZone(line.availableForSaleAt.getTime(), settings.timezone),
+  // Recalculé plutôt que stocké : le motif est une **lecture** de l'état de la
+  // ligne (méthode déclarée, relevé atteignant la cible ou non), pas un fait
+  // supplémentaire à persister et à maintenir en cohérence.
+  pendingReason: saleAvailability({
+    method: line.conditioningMethod,
+    packagedAt: line.packagedAt.getTime(),
+    carbonationValidatedAt: line.carbonationValidatedAt?.getTime() ?? null,
+    delays: settings,
+    timezone: settings.timezone,
+  }).pendingReason,
 });
 
 /**
@@ -167,7 +191,7 @@ export class BatchPackagingService {
       this.packaging.listPackaging(batchId),
       this.packaging.conditioningSettings(),
     ]);
-    return lines.map((line) => toLineApiView(line, settings.timezone));
+    return lines.map((line) => toLineApiView(line, settings));
   }
 
   /**
